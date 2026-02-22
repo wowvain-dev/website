@@ -680,9 +680,9 @@ fn app() -> Html {
                                                         return;
                                                     }
                                                     live.tree_entries = editor_tree_files(entries);
-                                                    live.tree_selection = live
-                                                        .tree_selection
-                                                        .min(live.tree_entries.len().saturating_sub(1));
+                                                    live.tree_selection = live.tree_selection.min(
+                                                        live.tree_entries.len().saturating_sub(1),
+                                                    );
                                                     live.status = format!(
                                                         "NvimTree: {}",
                                                         display_path(&tree_dir)
@@ -731,14 +731,17 @@ fn app() -> Html {
                                 state.tree_visible = !state.tree_visible;
                                 state.tree_focused = false;
                                 if state.tree_visible {
-                                    state.status = format!("NvimTree: {}", display_path(&state.tree_dir));
+                                    state.status =
+                                        format!("NvimTree: {}", display_path(&state.tree_dir));
 
                                     if state.tree_entries.is_empty() {
                                         let tree_dir = state.tree_dir.clone();
                                         let request_nonce = state.tree_nonce.wrapping_add(1);
                                         state.tree_nonce = request_nonce;
-                                        state.status =
-                                            format!("NvimTree: loading {}", display_path(&tree_dir));
+                                        state.status = format!(
+                                            "NvimTree: loading {}",
+                                            display_path(&tree_dir)
+                                        );
                                         let projects_data = (*projects).clone();
                                         let dir_cache = dir_cache.clone();
                                         let overrides = overrides.clone();
@@ -758,10 +761,14 @@ fn app() -> Html {
                                                         if live.tree_nonce != request_nonce {
                                                             return;
                                                         }
-                                                        live.tree_entries = editor_tree_files(entries);
-                                                        live.tree_selection = live
-                                                            .tree_selection
-                                                            .min(live.tree_entries.len().saturating_sub(1));
+                                                        live.tree_entries =
+                                                            editor_tree_files(entries);
+                                                        live.tree_selection =
+                                                            live.tree_selection.min(
+                                                                live.tree_entries
+                                                                    .len()
+                                                                    .saturating_sub(1),
+                                                            );
                                                         live.status = format!(
                                                             "NvimTree: {}",
                                                             display_path(&tree_dir)
@@ -975,7 +982,8 @@ fn app() -> Html {
                         "j" | "ArrowDown" => {
                             let preferred = previous_preferred_column
                                 .unwrap_or_else(|| line_column(state.content.as_str(), cursor));
-                            state.cursor = move_vertical(state.content.as_str(), cursor, 1, preferred);
+                            state.cursor =
+                                move_vertical(state.content.as_str(), cursor, 1, preferred);
                             state.preferred_column = Some(preferred);
                         }
                         "k" | "ArrowUp" => {
@@ -4551,7 +4559,7 @@ fn editor_mode_label(mode: EditorMode) -> &'static str {
 }
 
 fn format_prompt(cwd: &[String]) -> String {
-    format!("wowvain@webring:{}$ ", display_path(cwd))
+    format!("wowvain@kaaldur:{}$ ", display_path(cwd))
 }
 
 fn display_path(cwd: &[String]) -> String {
