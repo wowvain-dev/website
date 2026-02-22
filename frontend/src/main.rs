@@ -366,7 +366,7 @@ fn app() -> Html {
 
                 TimeoutFuture::new(180).await;
                 terminal.dispatch(TerminalAction::Append(vec![TerminalLine::command(
-                    "wowvain@webring:/projects$ about",
+                    "wowvain@kaaldur:/projects$ about",
                 )]));
                 terminal.dispatch(TerminalAction::Append(about_lines(
                     &fetched_identity,
@@ -1172,7 +1172,7 @@ fn app() -> Html {
                 if *boot_phase != BootPhase::Ready {
                     html! {
                         <header class="boot-header">
-                            <span class="prompt-label">{"wowvain@webring:/projects$ "}</span>
+                            <span class="prompt-label">{"wowvain@kaaldur:/projects$ "}</span>
                             <span>{(*boot_input).clone()}</span>
                             <span class="cursor">{if *cursor_on { "_" } else { " " }}</span>
                         </header>
