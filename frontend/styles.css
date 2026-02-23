@@ -227,6 +227,17 @@ body {
   color: var(--text);
 }
 
+.line-output-link {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.line-output-link:hover,
+.line-output-link:focus-visible {
+  color: #f2ffb0;
+  text-decoration: underline;
+}
+
 .line-identity {
   --identity-label-color: rgba(139, 172, 206, 0.95);
   --identity-value-color: rgba(205, 222, 241, 0.88);

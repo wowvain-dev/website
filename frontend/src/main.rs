@@ -103,6 +103,7 @@ struct TerminalLine {
     text: String,
     ls_tokens: Vec<LsToken>,
     project: Option<Project>,
+    link: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,6 +120,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
         }
     }
 
@@ -128,6 +130,17 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
+        }
+    }
+
+    fn output_link(text: impl Into<String>, href: impl Into<String>) -> Self {
+        Self {
+            kind: LineKind::Output,
+            text: text.into(),
+            ls_tokens: Vec::new(),
+            project: None,
+            link: Some(href.into()),
         }
     }
 
@@ -137,6 +150,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
         }
     }
 
@@ -146,6 +160,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
         }
     }
 
@@ -155,6 +170,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
         }
     }
 
@@ -164,6 +180,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            link: None,
         }
     }
 
@@ -173,6 +190,7 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: tokens,
             project: None,
+            link: None,
         }
     }
 
@@ -182,6 +200,7 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: Vec::new(),
             project: Some(project.clone()),
+            link: None,
         }
     }
 }
@@ -319,6 +338,7 @@ enum LanguageKind {
     Html,
     Css,
     Dart,
+    Lua,
     Toml,
     Yaml,
 }
@@ -1715,6 +1735,7 @@ fn app() -> Html {
                                         oninput={editor_oninput}
                                         onkeydown={editor_onkeydown}
                                         onscroll={editor_onscroll}
+                                        wrap="off"
                                         spellcheck="false"
                                     />
                                 </div>
@@ -1895,6 +1916,7 @@ async fn run_command(
     match command {
         "help" => outcome.lines = help_lines(),
         "about" => outcome.lines = about_lines(&identity, &projects),
+        "socials" => outcome.lines = socials_lines(),
         "pwd" => outcome
             .lines
             .push(TerminalLine::output(display_path(cwd.as_ref()))),
@@ -2903,12 +2925,14 @@ async fn get_repo_file(
         content
     };
 
-    let final_content = if decoded.len() > 50_000 {
-        let mut trimmed = decoded.chars().take(50_000).collect::<String>();
+    let normalized = decoded.replace("\r\n", "\n").replace('\r', "\n");
+
+    let final_content = if normalized.len() > 50_000 {
+        let mut trimmed = normalized.chars().take(50_000).collect::<String>();
         trimmed.push_str("\n\n[truncated]");
         trimmed
     } else {
-        decoded
+        normalized
     };
 
     let mut next = (*file_cache).clone();
@@ -3128,8 +3152,9 @@ async fn autocomplete_input(
 
 fn shell_commands() -> &'static [&'static str] {
     &[
-        "help", "about", "pwd", "ls", "cd", "cat", "head", "tail", "grep", "wc", "mkdir", "touch",
-        "rm", "stat", "tree", "nvim", "vim", "history", "whoami", "echo", "clear",
+        "help", "about", "socials", "pwd", "ls", "cd", "cat", "head", "tail", "grep", "wc",
+        "mkdir", "touch", "rm", "stat", "tree", "nvim", "vim", "history", "whoami", "echo",
+        "clear",
     ]
 }
 
@@ -3310,7 +3335,7 @@ fn ls_token(name: &str, width_ch: usize) -> LsToken {
 
     let (icon, class_name) = if ["rs"].contains(&ext) {
         ("", "ls-src")
-    } else if ["c", "cc", "cpp", "cxx", "h", "hpp", "hh", "cs", "odin"].contains(&ext) {
+    } else if ["c", "cc", "cpp", "cxx", "h", "hpp", "hh", "cs", "odin", "lua"].contains(&ext) {
         ("󰙱", "ls-src")
     } else if ["md", "txt", "adoc"].contains(&ext) || lower.contains("readme") {
         ("󰈙", "ls-doc")
@@ -3758,6 +3783,7 @@ fn help_lines() -> Vec<TerminalLine> {
         TerminalLine::section("[commands]"),
         TerminalLine::output("help                         show command list"),
         TerminalLine::output("about                        print profile summary"),
+        TerminalLine::output("socials                      print social links"),
         TerminalLine::output("pwd                          print current directory"),
         TerminalLine::output("ls [-1] [path]               list files/directories"),
         TerminalLine::output("cd [path]                    change directory"),
@@ -3780,10 +3806,24 @@ fn help_lines() -> Vec<TerminalLine> {
     ]
 }
 
+fn socials_lines() -> Vec<TerminalLine> {
+    vec![
+        TerminalLine::section("[socials]"),
+        TerminalLine::output_link("github: wowvain-dev", "https://github.com/wowvain-dev"),
+        TerminalLine::output_link("twitter: @thewowvain", "https://twitter.com/thewowvain"),
+        TerminalLine::output_link("instagram: @wowvain", "https://instagram.com/wowvain"),
+        TerminalLine::output_link("youtube: @wowvain", "https://youtube.com/@wowvain"),
+        TerminalLine::output_link("twitch: wowVAIN", "https://twitch.tv/wowVAIN"),
+    ]
+}
+
 fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
     let mut lines = Vec::new();
     lines.push(TerminalLine::section("[identity]"));
-    lines.push(TerminalLine::identity(format!("handle: {}", identity.handle)));
+    lines.push(TerminalLine::identity(format!(
+        "handle: {}",
+        identity.handle
+    )));
     lines.push(TerminalLine::identity(format!(
         "aliases: {}",
         identity.aliases.join(", ")
@@ -4080,7 +4120,7 @@ fn project_matches_filters(project: &Project, filters: &ProjectFilters) -> bool 
 }
 
 fn render_line(line: &TerminalLine) -> Html {
-    match line.kind {
+    match &line.kind {
         LineKind::Ls => html! {
             <div class="line line-ls-list">
                 {for line.ls_tokens.iter().map(|token| html! {
@@ -4108,7 +4148,15 @@ fn render_line(line: &TerminalLine) -> Html {
         }
         LineKind::Identity => render_identity_line(line.text.as_str()),
         _ => {
-            let class = match line.kind {
+            if let Some(href) = line.link.as_ref() {
+                return html! {
+                    <p class="line line-output">
+                        <a class="line-output-link" href={href.clone()} target="_blank" rel="noopener noreferrer">{line.text.clone()}</a>
+                    </p>
+                };
+            }
+
+            let class = match &line.kind {
                 LineKind::Command => "line line-command",
                 LineKind::Output => "line line-output",
                 LineKind::Identity => "line line-identity",
@@ -4235,6 +4283,7 @@ fn detect_language(path: &[String]) -> LanguageKind {
         "html" | "htm" | "xhtml" => LanguageKind::Html,
         "css" | "scss" => LanguageKind::Css,
         "dart" => LanguageKind::Dart,
+        "lua" => LanguageKind::Lua,
         "toml" => LanguageKind::Toml,
         "yaml" | "yml" => LanguageKind::Yaml,
         _ => LanguageKind::Plain,
@@ -4261,6 +4310,7 @@ fn language_label(language: LanguageKind) -> &'static str {
         LanguageKind::Html => "html",
         LanguageKind::Css => "css",
         LanguageKind::Dart => "dart",
+        LanguageKind::Lua => "lua",
         LanguageKind::Toml => "toml",
         LanguageKind::Yaml => "yaml",
     }
@@ -4341,7 +4391,8 @@ fn highlight_line(line: &str, language: LanguageKind, state: &mut HighlightState
         | LanguageKind::TypeScript
         | LanguageKind::Php
         | LanguageKind::Zig
-        | LanguageKind::Dart => highlight_c_family_line(line, language, state),
+        | LanguageKind::Dart
+        | LanguageKind::Lua => highlight_c_family_line(line, language, state),
         LanguageKind::Markdown => highlight_markdown_line(line, state),
         LanguageKind::Json => highlight_json_line(line),
         LanguageKind::Xml | LanguageKind::Html => highlight_markup_line(line),
@@ -5550,6 +5601,30 @@ fn language_keywords(language: LanguageKind) -> &'static [&'static str] {
             "null",
             "async",
             "await",
+        ],
+        LanguageKind::Lua => &[
+            "local",
+            "function",
+            "end",
+            "if",
+            "then",
+            "elseif",
+            "else",
+            "for",
+            "while",
+            "repeat",
+            "until",
+            "do",
+            "break",
+            "return",
+            "goto",
+            "in",
+            "and",
+            "or",
+            "not",
+            "nil",
+            "true",
+            "false",
         ],
         _ => &[],
     }
