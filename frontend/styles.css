@@ -103,6 +103,7 @@ body {
   position: relative;
   width: min(1060px, calc(100vw - 1.4rem));
   height: min(88vh, 900px);
+  zoom: 1.5;
   margin: auto;
   display: flex;
   flex-direction: column;

@@ -3812,7 +3812,7 @@ fn socials_lines() -> Vec<TerminalLine> {
         TerminalLine::output_link(" github: wowvain-dev", "https://github.com/wowvain-dev"),
         TerminalLine::output_link(" twitter: @thewowvain", "https://twitter.com/thewowvain"),
         TerminalLine::output_link(" instagram: @wowvain", "https://instagram.com/wowvain"),
-        TerminalLine::output_link(" youtube: @wowvain", "https://youtube.com/@wowvain"),
+        TerminalLine::output_link(" youtube: @wowvain", "https://youtube.com/@wowvain"),
         TerminalLine::output_link(" twitch: wowVAIN", "https://twitch.tv/wowVAIN"),
     ]
 }
