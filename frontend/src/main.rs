@@ -81,12 +81,12 @@ enum ProjectEra {
 enum LineKind {
     Command,
     Output,
+    Identity,
     Error,
     Section,
     Muted,
     Ls,
     Project,
-    Legend,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,13 +103,6 @@ struct TerminalLine {
     text: String,
     ls_tokens: Vec<LsToken>,
     project: Option<Project>,
-    legend: Option<LegendRow>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct LegendRow {
-    label: String,
-    badges: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -126,7 +119,6 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
-            legend: None,
         }
     }
 
@@ -136,7 +128,15 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
-            legend: None,
+        }
+    }
+
+    fn identity(text: impl Into<String>) -> Self {
+        Self {
+            kind: LineKind::Identity,
+            text: text.into(),
+            ls_tokens: Vec::new(),
+            project: None,
         }
     }
 
@@ -146,7 +146,6 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
-            legend: None,
         }
     }
 
@@ -156,7 +155,6 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
-            legend: None,
         }
     }
 
@@ -166,7 +164,6 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
-            legend: None,
         }
     }
 
@@ -176,7 +173,6 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: tokens,
             project: None,
-            legend: None,
         }
     }
 
@@ -186,23 +182,6 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: Vec::new(),
             project: Some(project.clone()),
-            legend: None,
-        }
-    }
-
-    fn legend(label: impl Into<String>, badges: &[&str]) -> Self {
-        Self {
-            kind: LineKind::Legend,
-            text: String::new(),
-            ls_tokens: Vec::new(),
-            project: None,
-            legend: Some(LegendRow {
-                label: label.into(),
-                badges: badges
-                    .iter()
-                    .map(|badge| (*badge).to_string())
-                    .collect::<Vec<_>>(),
-            }),
         }
     }
 }
@@ -3804,21 +3783,21 @@ fn help_lines() -> Vec<TerminalLine> {
 fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
     let mut lines = Vec::new();
     lines.push(TerminalLine::section("[identity]"));
-    lines.push(TerminalLine::output(format!("handle: {}", identity.handle)));
-    lines.push(TerminalLine::output(format!(
+    lines.push(TerminalLine::identity(format!("handle: {}", identity.handle)));
+    lines.push(TerminalLine::identity(format!(
         "aliases: {}",
         identity.aliases.join(", ")
     )));
-    lines.push(TerminalLine::output(format!(
+    lines.push(TerminalLine::identity(format!(
         "tagline: {}",
         identity.tagline
     )));
-    lines.push(TerminalLine::output(format!(
+    lines.push(TerminalLine::identity(format!(
         "location: {}",
         identity.location
     )));
-    lines.push(TerminalLine::output(STUDIES_LINE));
-    lines.push(TerminalLine::output(format!(
+    lines.push(TerminalLine::identity(STUDIES_LINE));
+    lines.push(TerminalLine::identity(format!(
         "focus: {}",
         identity.focus.join(" | ")
     )));
@@ -3840,14 +3819,6 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
             lines.push(TerminalLine::project(project));
         }
     }
-
-    lines.push(TerminalLine::section("[legend]"));
-    lines.push(TerminalLine::legend("team", &["SOLO", "TEAM"]));
-    lines.push(TerminalLine::legend(
-        "context",
-        &["PERSONAL", "UNI", "PROFESSIONAL"],
-    ));
-    lines.push(TerminalLine::legend("currentness", &["LEGACY"]));
 
     lines.push(TerminalLine::muted(format!(
         "scope: {}",
@@ -3895,12 +3866,6 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
             ));
         }
     }
-    output.push(String::new());
-    output.push(String::from("legend:"));
-    output.push(String::from("  team: SOLO | TEAM"));
-    output.push(String::from("  context: PERSONAL | UNI | PROFESSIONAL"));
-    output.push(String::from("  currentness: LEGACY"));
-
     output.push(String::new());
     output.push(format!("scope: {}", identity.scope_note));
     output.push(format!("snapshot: {}", identity.snapshot_date));
@@ -4095,17 +4060,6 @@ fn render_project_badge(badge: &str) -> Html {
     html! { <span class={classes!("project-badge", class)}>{badge}</span> }
 }
 
-fn render_legend_row(row: &LegendRow) -> Html {
-    html! {
-        <div class="line line-legend">
-            <span class="legend-label">{format!("{}:", row.label)}</span>
-            <span class="project-badges">
-                {for row.badges.iter().map(|badge| render_project_badge(badge.as_str()))}
-            </span>
-        </div>
-    }
-}
-
 fn project_matches_filters(project: &Project, filters: &ProjectFilters) -> bool {
     let team = resolved_project_team(project);
     let context = resolved_project_context(project);
@@ -4152,27 +4106,48 @@ fn render_line(line: &TerminalLine) -> Html {
                 html! { <p class="line line-muted">{"[invalid project line]"}</p> }
             }
         }
-        LineKind::Legend => {
-            if let Some(row) = line.legend.as_ref() {
-                render_legend_row(row)
-            } else {
-                html! { <p class="line line-muted">{"[invalid legend line]"}</p> }
-            }
-        }
+        LineKind::Identity => render_identity_line(line.text.as_str()),
         _ => {
             let class = match line.kind {
                 LineKind::Command => "line line-command",
                 LineKind::Output => "line line-output",
+                LineKind::Identity => "line line-identity",
                 LineKind::Error => "line line-error",
                 LineKind::Muted => "line line-muted",
                 LineKind::Ls => "line",
                 LineKind::Project => "line",
-                LineKind::Legend => "line",
                 LineKind::Section => "line",
             };
 
             html! { <p class={class}>{line.text.clone()}</p> }
         }
+    }
+}
+
+fn render_identity_line(text: &str) -> Html {
+    if let Some((label, value)) = text.split_once(':') {
+        let tone_class = identity_tone_class(label);
+        html! {
+            <p class={classes!("line", "line-identity", tone_class)}>
+                <span class="identity-label">{format!("{label}:")}</span>
+                <span class="identity-value">{format!(" {}", value.trim_start())}</span>
+            </p>
+        }
+    } else {
+        html! { <p class={classes!("line", "line-identity", "identity-tone-default")}>{text.to_string()}</p> }
+    }
+}
+
+fn identity_tone_class(label: &str) -> &'static str {
+    let normalized = label.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "handle" => "identity-tone-1",
+        "aliases" => "identity-tone-2",
+        "tagline" => "identity-tone-3",
+        "location" => "identity-tone-4",
+        "bachelor" => "identity-tone-5",
+        "focus" => "identity-tone-6",
+        _ => "identity-tone-default",
     }
 }
 

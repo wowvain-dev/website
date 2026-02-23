@@ -227,6 +227,55 @@ body {
   color: var(--text);
 }
 
+.line-identity {
+  --identity-label-color: rgba(139, 172, 206, 0.95);
+  --identity-value-color: rgba(205, 222, 241, 0.88);
+  color: var(--identity-value-color);
+}
+
+.identity-label {
+  color: var(--identity-label-color);
+}
+
+.identity-value {
+  color: var(--identity-value-color);
+}
+
+.line-identity.identity-tone-1 {
+  --identity-label-color: rgba(126, 183, 238, 0.96);
+  --identity-value-color: rgba(196, 225, 251, 0.9);
+}
+
+.line-identity.identity-tone-2 {
+  --identity-label-color: rgba(123, 201, 224, 0.96);
+  --identity-value-color: rgba(192, 230, 243, 0.9);
+}
+
+.line-identity.identity-tone-3 {
+  --identity-label-color: rgba(157, 173, 235, 0.96);
+  --identity-value-color: rgba(214, 221, 252, 0.9);
+}
+
+.line-identity.identity-tone-4 {
+  --identity-label-color: rgba(124, 191, 185, 0.96);
+  --identity-value-color: rgba(196, 231, 227, 0.9);
+}
+
+.line-identity.identity-tone-5 {
+  --identity-label-color: rgba(199, 180, 125, 0.95);
+  --identity-value-color: rgba(228, 215, 179, 0.9);
+}
+
+.line-identity.identity-tone-6 {
+  --identity-label-color: rgba(149, 198, 149, 0.95);
+  --identity-value-color: rgba(211, 236, 211, 0.9);
+}
+
+.line-identity.identity-tone-default {
+  --identity-label-color: rgba(139, 172, 206, 0.95);
+  --identity-value-color: rgba(205, 222, 241, 0.88);
+}
+
 .line-error {
   color: var(--error);
 }
