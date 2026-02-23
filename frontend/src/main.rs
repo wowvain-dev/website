@@ -15,6 +15,8 @@ type DirCache = HashMap<String, Vec<RepoEntry>>;
 type FileCache = HashMap<String, String>;
 type OverrideMap = HashMap<String, String>;
 const MOBILE_NVIM_WARNING: &str = "nvim texteditor functionality is incompatible with phones";
+const STUDIES_LINE: &str =
+    "bachelor: computer science & engineering year 2 @ delft university of technology";
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 struct Identity {
@@ -1553,6 +1555,9 @@ fn app() -> Html {
                                 });
                             }
                             if line.text == "[other projects]" {
+                                if filters != ProjectFilters::default() {
+                                    return None;
+                                }
                                 let has_project_after = terminal
                                     .lines
                                     .iter()
@@ -3799,6 +3804,7 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
         "location: {}",
         identity.location
     )));
+    lines.push(TerminalLine::output(STUDIES_LINE));
     lines.push(TerminalLine::output(format!(
         "focus: {}",
         identity.focus.join(" | ")
@@ -3849,6 +3855,7 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
     output.push(format!("aliases: {}", identity.aliases.join(", ")));
     output.push(format!("tagline: {}", identity.tagline));
     output.push(format!("location: {}", identity.location));
+    output.push(String::from(STUDIES_LINE));
     output.push(format!("focus: {}", identity.focus.join(" | ")));
     output.push(String::new());
     output.push(String::from("projects:"));
