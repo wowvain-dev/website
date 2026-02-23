@@ -54,6 +54,7 @@
   --ls-img: #df9eff;
   --ls-bin: #ff8a8a;
   --ls-file: #d8e5f0;
+  --ls-private: #ff7676;
   --scroll-track: rgba(8, 16, 24, 0.9);
   --scroll-thumb: rgba(117, 152, 181, 0.52);
   --scroll-thumb-hover: rgba(160, 198, 230, 0.68);
@@ -235,6 +236,26 @@ body {
   color: var(--link);
 }
 
+.line-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.85rem 0 0.6rem;
+  color: rgba(151, 171, 192, 0.7);
+}
+
+.line-section-divider::before,
+.line-section-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid rgba(151, 171, 192, 0.24);
+}
+
+.line-section-divider > span {
+  font-size: 0.9em;
+  letter-spacing: 0.02em;
+}
+
 .line-muted {
   color: var(--muted);
 }
@@ -404,13 +425,16 @@ a.project-name:focus-visible {
   color: var(--text);
 }
 
-.line-ls {
+.line-ls-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+}
+
+.line-ls-row {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
-  overflow-x: auto;
-  white-space: nowrap;
-  padding-bottom: 0.05rem;
+  min-height: 1.2em;
 }
 
 .ls-entry {
@@ -463,6 +487,11 @@ a.project-name:focus-visible {
 
 .ls-file {
   color: var(--ls-file);
+}
+
+.ls-private-repo {
+  color: var(--ls-private);
+  font-weight: 600;
 }
 
 .prompt-row {
@@ -736,18 +765,44 @@ a.project-name:focus-visible {
 }
 
 .editor-tree-path {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.55rem 0.7rem;
   border-bottom: 1px dashed var(--border);
   color: var(--muted);
+}
+
+.editor-tree-path-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.editor-tree-help-trigger {
+  border: 1px dashed rgba(129, 196, 255, 0.38);
+  background: rgba(10, 20, 30, 0.74);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.83em;
+  padding: 0.1rem 0.36rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor-tree-help-trigger:hover {
+  border-color: rgba(146, 217, 255, 0.68);
+  color: #cde6ff;
+}
+
 .editor-tree-list {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   padding: 0.35rem 0.5rem;
 }
 
@@ -757,12 +812,17 @@ a.project-name:focus-visible {
 
 .tree-entry {
   display: grid;
-  grid-template-columns: 1ch 2ch 1fr;
-  gap: 0.45ch;
+  grid-template-columns: 1ch 1ch 2ch 1fr;
+  gap: 0.35ch;
   align-items: baseline;
   padding: 0.11rem 0.2rem;
   border-radius: 2px;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.tree-fold {
+  color: var(--muted);
 }
 
 .tree-entry.is-selected {
@@ -789,11 +849,9 @@ a.project-name:focus-visible {
   text-overflow: ellipsis;
 }
 
-.editor-tree-hint {
-  border-top: 1px dashed var(--border);
-  padding: 0.4rem 0.6rem;
-  color: var(--muted);
-  font-size: 0.88em;
+.tree-private-repo .tree-name,
+.tree-private-repo .tree-icon {
+  color: var(--ls-private);
 }
 
 .completion-panel {
@@ -801,6 +859,108 @@ a.project-name:focus-visible {
   overflow: auto;
   padding: 0.3rem 1rem 0.7rem;
   background: linear-gradient(180deg, rgba(17, 29, 42, 0.88), rgba(17, 29, 42, 0.96));
+}
+
+.center-popup-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  background: rgba(3, 8, 13, 0.64);
+  transition: opacity 260ms ease;
+}
+
+.center-popup-overlay.is-active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.center-popup-card {
+  position: relative;
+  width: min(560px, calc(100% - 1rem));
+  border: 1px solid rgba(146, 217, 255, 0.62);
+  background: rgba(8, 16, 24, 0.98);
+  box-shadow: 0 0 0 1px rgba(146, 217, 255, 0.25), 0 18px 34px rgba(0, 0, 0, 0.48);
+  padding: 0.8rem 0.9rem;
+  transform: translateY(10px) scale(0.98);
+  transition: transform 260ms ease;
+}
+
+.center-popup-overlay.is-active .center-popup-card {
+  transform: translateY(0) scale(1);
+}
+
+.center-popup-title {
+  color: #dcecff;
+  font-size: 0.95em;
+  font-weight: 600;
+  margin-bottom: 0.55rem;
+}
+
+.center-popup-body {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.center-popup-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid rgba(146, 217, 255, 0.6);
+  background: linear-gradient(180deg, rgba(13, 25, 37, 0.98), rgba(9, 18, 28, 0.98));
+  cursor: pointer;
+}
+
+.center-popup-close::before,
+.center-popup-close::after {
+  content: "";
+  position: absolute;
+  width: 0.65rem;
+  height: 1px;
+  left: 50%;
+  top: 50%;
+  background: #dcecff;
+}
+
+.center-popup-close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.center-popup-close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.center-popup-close:hover {
+  border-color: rgba(182, 232, 255, 0.88);
+  box-shadow: 0 0 0 1px rgba(182, 232, 255, 0.26);
+}
+
+.keybind-groups {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.keybind-group {
+  border-top: 1px dashed rgba(151, 171, 192, 0.28);
+  padding-top: 0.45rem;
+  color: var(--text);
+}
+
+.keybind-group:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.keybind-group-label {
+  color: var(--link);
+  margin-bottom: 0.25rem;
 }
 
 .completion-panel .line {

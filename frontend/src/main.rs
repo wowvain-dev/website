@@ -252,12 +252,23 @@ struct EditorState {
     tree_visible: bool,
     tree_focused: bool,
     tree_dir: Vec<String>,
-    tree_entries: Vec<String>,
+    tree_entries: Vec<EditorTreeEntry>,
     tree_selection: usize,
-    tree_nonce: u64,
+    show_keybinds_help: bool,
     leader_pending: bool,
     leader_window_pending: bool,
     g_pending: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct EditorTreeEntry {
+    name: String,
+    path: Vec<String>,
+    depth: usize,
+    is_dir: bool,
+    private_repo: bool,
+    expanded: bool,
+    loading: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -352,6 +363,7 @@ fn app() -> Html {
     let auto_scroll_terminal = use_state(|| false);
     let font_loading = use_state(|| true);
     let prompt_spotlight = use_state(|| false);
+    let phone_warning_popup_visible = use_state(|| is_phone_client);
     let cursor_on = use_state(|| true);
     let command_input = use_state(String::new);
     let completion_lines = use_state(Vec::<TerminalLine>::new);
@@ -396,7 +408,6 @@ fn app() -> Html {
         let boot_phase = boot_phase.clone();
         let prompt_spotlight = prompt_spotlight.clone();
         let cwd = cwd.clone();
-        let is_phone_client = is_phone_client;
 
         use_effect_with((), move |_| {
             spawn_local(async move {
@@ -425,11 +436,6 @@ fn app() -> Html {
                 cwd.set(vec![String::from("projects")]);
 
                 boot_phase.set(BootPhase::Ready);
-                if is_phone_client {
-                    terminal.dispatch(TerminalAction::Append(vec![TerminalLine::error(
-                        MOBILE_NVIM_WARNING,
-                    )]));
-                }
                 TimeoutFuture::new(420).await;
                 prompt_spotlight.set(true);
             });
@@ -459,11 +465,7 @@ fn app() -> Html {
         let line_count = terminal.lines.len();
         use_effect_with((boot_ready, busy_now, editor_open, line_count), move |_| {
             if boot_ready && !busy_now && !editor_open {
-                if let Some(input) = prompt_input_ref.cast::<HtmlInputElement>() {
-                    let _ = input.focus();
-                    let len = input.value().len() as u32;
-                    let _ = input.set_selection_range(len, len);
-                }
+                set_prompt_focus(&prompt_input_ref);
             }
             || ()
         });
@@ -491,6 +493,30 @@ fn app() -> Html {
                         let _ = area.focus();
                         let pos = editor.cursor.min(area.value().len()) as u32;
                         let _ = area.set_selection_range(pos, pos);
+                    }
+                }
+            }
+            || ()
+        });
+    }
+
+    {
+        let editor_state = (*editor).clone();
+        let editor_tree_ref = editor_tree_ref.clone();
+        use_effect_with(editor_state, move |state| {
+            if let Some(editor_state) = state {
+                if editor_state.tree_visible && editor_state.tree_focused {
+                    if let Some(tree_list) = editor_tree_ref.cast::<HtmlElement>() {
+                        let row_height = 22;
+                        let selected_top = (editor_state.tree_selection as i32) * row_height;
+                        let selected_bottom = selected_top + row_height;
+                        let viewport_top = tree_list.scroll_top();
+                        let viewport_bottom = viewport_top + tree_list.client_height();
+                        if selected_top < viewport_top {
+                            tree_list.set_scroll_top(selected_top);
+                        } else if selected_bottom > viewport_bottom {
+                            tree_list.set_scroll_top(selected_bottom - tree_list.client_height());
+                        }
                     }
                 }
             }
@@ -662,10 +688,46 @@ fn app() -> Html {
     };
     let dismiss_prompt_spotlight = {
         let prompt_spotlight = prompt_spotlight.clone();
+        let prompt_input_ref = prompt_input_ref.clone();
         Callback::from(move |event: MouseEvent| {
             event.prevent_default();
             event.stop_propagation();
             prompt_spotlight.set(false);
+            set_prompt_focus(&prompt_input_ref);
+        })
+    };
+    let dismiss_phone_warning_popup = {
+        let phone_warning_popup_visible = phone_warning_popup_visible.clone();
+        let prompt_input_ref = prompt_input_ref.clone();
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            phone_warning_popup_visible.set(false);
+            set_prompt_focus(&prompt_input_ref);
+        })
+    };
+    let open_editor_keybinds_popup = {
+        let editor = editor.clone();
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            if let Some(mut state) = (*editor).clone() {
+                state.show_keybinds_help = true;
+                state.status = String::from("keybinds");
+                editor.set(Some(state));
+            }
+        })
+    };
+    let dismiss_editor_keybinds_popup = {
+        let editor = editor.clone();
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            if let Some(mut state) = (*editor).clone() {
+                state.show_keybinds_help = false;
+                state.status = String::from("-- NORMAL --");
+                editor.set(Some(state));
+            }
         })
     };
     let on_terminal_click = {
@@ -685,11 +747,7 @@ fn app() -> Html {
                 return;
             }
 
-            if let Some(input) = prompt_input_ref.cast::<HtmlInputElement>() {
-                let _ = input.focus();
-                let len = input.value().len() as u32;
-                let _ = input.set_selection_range(len, len);
-            }
+            set_prompt_focus(&prompt_input_ref);
         })
     };
 
@@ -764,6 +822,24 @@ fn app() -> Html {
                 EditorMode::Normal => {
                     let key = event.key();
 
+                    if state.show_keybinds_help {
+                        if key == "Escape" || key == "?" {
+                            event.prevent_default();
+                            state.show_keybinds_help = false;
+                            state.status = String::from("-- NORMAL --");
+                            editor.set(Some(state));
+                        }
+                        return;
+                    }
+
+                    if key == "?" {
+                        event.prevent_default();
+                        state.show_keybinds_help = true;
+                        state.status = String::from("keybinds");
+                        editor.set(Some(state));
+                        return;
+                    }
+
                     if state.leader_window_pending {
                         event.prevent_default();
                         state.leader_window_pending = false;
@@ -777,8 +853,6 @@ fn app() -> Html {
 
                                 if state.tree_entries.is_empty() {
                                     let tree_dir = state.tree_dir.clone();
-                                    let request_nonce = state.tree_nonce.wrapping_add(1);
-                                    state.tree_nonce = request_nonce;
                                     state.status =
                                         format!("NvimTree: loading {}", display_path(&tree_dir));
                                     let projects_data = (*projects).clone();
@@ -797,10 +871,12 @@ fn app() -> Html {
                                         {
                                             Ok(entries) => {
                                                 if let Some(mut live) = (*editor).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
-                                                    live.tree_entries = editor_tree_files(entries);
+                                                    live.tree_entries = editor_tree_files(
+                                                        &tree_dir,
+                                                        entries,
+                                                        0,
+                                                        &projects_data,
+                                                    );
                                                     live.tree_selection = live.tree_selection.min(
                                                         live.tree_entries.len().saturating_sub(1),
                                                     );
@@ -813,9 +889,6 @@ fn app() -> Html {
                                             }
                                             Err(error) => {
                                                 if let Some(mut live) = (*editor).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
                                                     live.tree_entries.clear();
                                                     live.tree_selection = 0;
                                                     live.status = format!(
@@ -857,8 +930,6 @@ fn app() -> Html {
 
                                     if state.tree_entries.is_empty() {
                                         let tree_dir = state.tree_dir.clone();
-                                        let request_nonce = state.tree_nonce.wrapping_add(1);
-                                        state.tree_nonce = request_nonce;
                                         state.status = format!(
                                             "NvimTree: loading {}",
                                             display_path(&tree_dir)
@@ -879,11 +950,12 @@ fn app() -> Html {
                                             {
                                                 Ok(entries) => {
                                                     if let Some(mut live) = (*editor).clone() {
-                                                        if live.tree_nonce != request_nonce {
-                                                            return;
-                                                        }
-                                                        live.tree_entries =
-                                                            editor_tree_files(entries);
+                                                        live.tree_entries = editor_tree_files(
+                                                            &tree_dir,
+                                                            entries,
+                                                            0,
+                                                            &projects_data,
+                                                        );
                                                         live.tree_selection =
                                                             live.tree_selection.min(
                                                                 live.tree_entries
@@ -899,9 +971,6 @@ fn app() -> Html {
                                                 }
                                                 Err(error) => {
                                                     if let Some(mut live) = (*editor).clone() {
-                                                        if live.tree_nonce != request_nonce {
-                                                            return;
-                                                        }
                                                         live.tree_entries.clear();
                                                         live.tree_selection = 0;
                                                         live.status = format!(
@@ -980,13 +1049,42 @@ fn app() -> Html {
                                 editor.set(Some(state));
                             }
                             "h" | "ArrowLeft" => {
+                                let current_index =
+                                    state.tree_selection.min(state.tree_entries.len().saturating_sub(1));
+                                if let Some(current_entry) =
+                                    state.tree_entries.get(current_index).cloned()
+                                {
+                                    if current_entry.is_dir && current_entry.expanded {
+                                        clear_tree_children(&mut state.tree_entries, current_index);
+                                        if let Some(entry) = state.tree_entries.get_mut(current_index)
+                                        {
+                                            entry.expanded = false;
+                                            entry.loading = false;
+                                        }
+                                        state.status =
+                                            format!("NvimTree: {}", display_path(&current_entry.path));
+                                        editor.set(Some(state));
+                                        return;
+                                    }
+
+                                    if let Some(parent_index) =
+                                        parent_tree_index(&state.tree_entries, current_index)
+                                    {
+                                        state.tree_selection = parent_index;
+                                        if let Some(parent) = state.tree_entries.get(parent_index) {
+                                            state.status =
+                                                format!("NvimTree: {}", display_path(&parent.path));
+                                        }
+                                        editor.set(Some(state));
+                                        return;
+                                    }
+                                }
+
                                 if state.tree_dir.is_empty() {
                                     state.status = String::from("NvimTree: /");
                                     editor.set(Some(state));
                                 } else {
                                     let parent = state.tree_dir[..state.tree_dir.len() - 1].to_vec();
-                                    let request_nonce = state.tree_nonce.wrapping_add(1);
-                                    state.tree_nonce = request_nonce;
                                     state.status =
                                         format!("NvimTree: loading {}", display_path(&parent));
                                     let projects_data = (*projects).clone();
@@ -1006,12 +1104,15 @@ fn app() -> Html {
                                         {
                                             Ok(entries) => {
                                                 if let Some(mut live) = (*editor_for_async).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
                                                     live.tree_dir = requested_dir.clone();
-                                                    live.tree_entries = editor_tree_files(entries);
+                                                    live.tree_entries = editor_tree_files(
+                                                        &requested_dir,
+                                                        entries,
+                                                        0,
+                                                        &projects_data,
+                                                    );
                                                     live.tree_selection = 0;
+                                                    live.tree_focused = true;
                                                     live.status = format!(
                                                         "NvimTree: {}",
                                                         display_path(&requested_dir)
@@ -1021,9 +1122,6 @@ fn app() -> Html {
                                             }
                                             Err(error) => {
                                                 if let Some(mut live) = (*editor_for_async).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
                                                     live.status = format!(
                                                         "NvimTree error ({}): {error}",
                                                         display_path(&requested_dir)
@@ -1037,153 +1135,23 @@ fn app() -> Html {
                                 }
                             }
                             "Enter" | "l" | "ArrowRight" => {
-                                let Some(selected) =
-                                    state.tree_entries.get(state.tree_selection).cloned()
-                                else {
-                                    editor.set(Some(state));
-                                    return;
-                                };
-
-                                let mut target = state.tree_dir.clone();
-                                target.push(selected.trim_end_matches('/').to_string());
-
-                                if selected.ends_with('/') {
-                                    let request_nonce = state.tree_nonce.wrapping_add(1);
-                                    state.tree_nonce = request_nonce;
-                                    state.status =
-                                        format!("NvimTree: loading {}", display_path(&target));
-                                    let projects_data = (*projects).clone();
-                                    let dir_cache = dir_cache.clone();
-                                    let overrides = overrides.clone();
-                                    let editor_for_async = editor.clone();
-                                    let requested_dir = target.clone();
-
-                                    spawn_local(async move {
-                                        match list_path(
-                                            &requested_dir,
-                                            &projects_data,
-                                            dir_cache,
-                                            overrides,
-                                        )
-                                        .await
-                                        {
-                                            Ok(entries) => {
-                                                if let Some(mut live) = (*editor_for_async).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
-                                                    live.tree_dir = requested_dir.clone();
-                                                    live.tree_entries = editor_tree_files(entries);
-                                                    live.tree_selection = 0;
-                                                    live.status = format!(
-                                                        "NvimTree: {}",
-                                                        display_path(&requested_dir)
-                                                    );
-                                                    editor_for_async.set(Some(live));
-                                                }
-                                            }
-                                            Err(error) => {
-                                                if let Some(mut live) = (*editor_for_async).clone() {
-                                                    if live.tree_nonce != request_nonce {
-                                                        return;
-                                                    }
-                                                    live.status = format!(
-                                                        "NvimTree error ({}): {error}",
-                                                        display_path(&requested_dir)
-                                                    );
-                                                    editor_for_async.set(Some(live));
-                                                }
-                                            }
-                                        }
-                                    });
-                                    editor.set(Some(state));
-                                } else {
-                                    let identity_data =
-                                        identity.as_ref().cloned().unwrap_or_else(default_identity);
-                                    let projects_data = (*projects).clone();
-                                    let file_cache = file_cache.clone();
-                                    let overrides = overrides.clone();
-                                    let dir_cache = dir_cache.clone();
-                                    let editor = editor.clone();
-                                    let requested_file = target.clone();
-
-                                    spawn_local(async move {
-                                        match cat_path(
-                                            &requested_file,
-                                            &identity_data,
-                                            &projects_data,
-                                            file_cache,
-                                            overrides.clone(),
-                                        )
-                                        .await
-                                        {
-                                            Ok(content) => {
-                                                let parent = requested_file
-                                                    [..requested_file.len().saturating_sub(1)]
-                                                    .to_vec();
-                                                let tree_entries = list_path(
-                                                    &parent,
-                                                    &projects_data,
-                                                    dir_cache,
-                                                    overrides,
-                                                )
-                                                .await
-                                                .unwrap_or_default();
-
-                                                if let Some(mut live) = (*editor).clone() {
-                                                    if live.tree_dir != parent {
-                                                        return;
-                                                    }
-                                                    let selected_name = requested_file
-                                                        .last()
-                                                        .cloned()
-                                                        .unwrap_or_default();
-                                                    live.path = requested_file.clone();
-                                                    live.content = content;
-                                                    live.cursor = 0;
-                                                    live.preferred_column = None;
-                                                    live.mode = EditorMode::Normal;
-                                                    live.status = format!(
-                                                        "opened {}",
-                                                        display_path(&live.path)
-                                                    );
-                                                    live.dirty = false;
-                                                    live.tree_dir = parent;
-                                                    live.tree_entries =
-                                                        editor_tree_files(tree_entries);
-                                                    live.tree_selection = live
-                                                        .tree_entries
-                                                        .iter()
-                                                        .position(|entry| {
-                                                            entry.trim_end_matches('/')
-                                                                == selected_name.as_str()
-                                                        })
-                                                        .unwrap_or(0);
-                                                    live.tree_focused = false;
-                                                    live.leader_pending = false;
-                                                    live.leader_window_pending = false;
-                                                    live.g_pending = false;
-                                                    editor.set(Some(live));
-                                                }
-                                            }
-                                            Err(error) => {
-                                                if let Some(mut live) = (*editor).clone() {
-                                                    let requested_parent = requested_file
-                                                        [..requested_file.len().saturating_sub(1)]
-                                                        .to_vec();
-                                                    if live.tree_dir != requested_parent {
-                                                        return;
-                                                    }
-                                                    live.status = format!(
-                                                        "NvimTree error ({}): {error}",
-                                                        display_path(&requested_file)
-                                                    );
-                                                    editor.set(Some(live));
-                                                }
-                                            }
-                                        }
-                                    });
-                                }
+                                let identity_data =
+                                    identity.as_ref().cloned().unwrap_or_else(default_identity);
+                                let projects_data = (*projects).clone();
+                                let selected_index = state
+                                    .tree_selection
+                                    .min(state.tree_entries.len().saturating_sub(1));
+                                activate_tree_entry(
+                                    &mut state,
+                                    selected_index,
+                                    identity_data,
+                                    projects_data,
+                                    dir_cache.clone(),
+                                    file_cache.clone(),
+                                    overrides.clone(),
+                                    editor.clone(),
+                                );
+                                editor.set(Some(state));
                             }
                             _ => {
                                 editor.set(Some(state));
@@ -1565,7 +1533,7 @@ fn app() -> Html {
 
         html! {
             <>
-                {for terminal.lines.iter().filter_map(|line| {
+                {for terminal.lines.iter().enumerate().filter_map(|(index, line)| {
                     match line.kind {
                         LineKind::Project => {
                             let project = line.project.as_ref()?;
@@ -1575,7 +1543,7 @@ fn app() -> Html {
                             Some(render_line(line))
                         }
                         LineKind::Section => {
-                            if line.text == "[featured projects]" && !filters_inserted {
+                            if line.text == "[projects]" && !filters_inserted {
                                 filters_inserted = true;
                                 return Some(html! {
                                     <>
@@ -1583,6 +1551,24 @@ fn app() -> Html {
                                         {render_filters_bar()}
                                     </>
                                 });
+                            }
+                            if line.text == "[other projects]" {
+                                let has_project_after = terminal
+                                    .lines
+                                    .iter()
+                                    .skip(index + 1)
+                                    .any(|next| {
+                                        matches!(next.kind, LineKind::Project)
+                                            && next
+                                                .project
+                                                .as_ref()
+                                                .is_some_and(|project| {
+                                                    project_matches_filters(project, &filters)
+                                                })
+                                    });
+                                if !has_project_after {
+                                    return None;
+                                }
                             }
                             Some(render_line(line))
                         }
@@ -1651,7 +1637,16 @@ fn app() -> Html {
                                                 "editor-tree",
                                                 if editor_state.tree_focused { "is-focused" } else { "" }
                                             )}>
-                                                <div class="editor-tree-path">{tree_path}</div>
+                                                <div class="editor-tree-path">
+                                                    <span class="editor-tree-path-text">{tree_path}</span>
+                                                    <button
+                                                        class="editor-tree-help-trigger"
+                                                        type="button"
+                                                        onclick={open_editor_keybinds_popup.clone()}
+                                                    >
+                                                        {"press '?' for keybinds"}
+                                                    </button>
+                                                </div>
                                                 <div
                                                     class="editor-tree-list"
                                                     ref={editor_tree_ref.clone()}
@@ -1660,11 +1655,51 @@ fn app() -> Html {
                                                 >
                                                     {
                                                         for editor_state.tree_entries.iter().enumerate().map(|(index, entry)| {
-                                                            render_tree_entry(index, entry, index == editor_state.tree_selection)
+                                                            let editor = editor.clone();
+                                                            let identity = identity.clone();
+                                                            let projects = projects.clone();
+                                                            let dir_cache = dir_cache.clone();
+                                                            let file_cache = file_cache.clone();
+                                                            let overrides = overrides.clone();
+                                                            let on_click = Callback::from(move |event: MouseEvent| {
+                                                                event.prevent_default();
+                                                                event.stop_propagation();
+                                                                if let Some(mut state) = (*editor).clone() {
+                                                                    if state.tree_entries.is_empty() {
+                                                                        return;
+                                                                    }
+                                                                    let selected_index = index.min(
+                                                                        state.tree_entries.len().saturating_sub(1),
+                                                                    );
+                                                                    state.tree_selection = selected_index;
+                                                                    state.tree_focused = true;
+                                                                    let identity_data = identity
+                                                                        .as_ref()
+                                                                        .cloned()
+                                                                        .unwrap_or_else(default_identity);
+                                                                    let projects_data = (*projects).clone();
+                                                                    activate_tree_entry(
+                                                                        &mut state,
+                                                                        selected_index,
+                                                                        identity_data,
+                                                                        projects_data,
+                                                                        dir_cache.clone(),
+                                                                        file_cache.clone(),
+                                                                        overrides.clone(),
+                                                                        editor.clone(),
+                                                                    );
+                                                                    editor.set(Some(state));
+                                                                }
+                                                            });
+                                                            render_tree_entry(
+                                                                index,
+                                                                entry,
+                                                                index == editor_state.tree_selection,
+                                                                on_click,
+                                                            )
                                                         })
                                                     }
                                                 </div>
-                                                <div class="editor-tree-hint">{"<Space>e toggle | Enter/l open item | h go parent | <Space>w h/j/k/l switch pane | editor: w/b words, gg/G file"}</div>
                                             </aside>
                                         }
                                     } else {
@@ -1714,6 +1749,45 @@ fn app() -> Html {
                                                 spellcheck="false"
                                             />
                                         </form>
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            }
+                            {
+                                if editor_state.show_keybinds_help {
+                                    html! {
+                                        <div class={classes!("center-popup-overlay", "is-active")}>
+                                            <div class="center-popup-card keybinds-popup-card">
+                                                <button
+                                                    class="center-popup-close"
+                                                    type="button"
+                                                    onclick={dismiss_editor_keybinds_popup.clone()}
+                                                    aria-label="Close keybinds help"
+                                                ></button>
+                                                <div class="center-popup-title">{"nvim keybinds"}</div>
+                                                <div class="keybind-groups">
+                                                    <div class="keybind-group">
+                                                        <div class="keybind-group-label">{"navigation"}</div>
+                                                        <div>{"h / j / k / l  move cursor"}</div>
+                                                        <div>{"w / b          next / previous word"}</div>
+                                                        <div>{"gg / G         top / bottom of file"}</div>
+                                                    </div>
+                                                    <div class="keybind-group">
+                                                        <div class="keybind-group-label">{"explorer"}</div>
+                                                        <div>{"<Space>e       toggle explorer"}</div>
+                                                        <div>{"Enter / l      open file or expand folder"}</div>
+                                                        <div>{"h             collapse folder / select parent"}</div>
+                                                    </div>
+                                                    <div class="keybind-group">
+                                                        <div class="keybind-group-label">{"windows & modes"}</div>
+                                                        <div>{"<Space>w h/j/k/l switch pane"}</div>
+                                                        <div>{"i / Esc        insert / normal mode"}</div>
+                                                        <div>{":w / :q / :wq  save / close / save+close"}</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     }
                                 } else {
                                     html! {}
@@ -1781,6 +1855,28 @@ fn app() -> Html {
                     }
                 }
             }
+            {
+                if is_phone_client && *boot_phase == BootPhase::Ready && *phone_warning_popup_visible {
+                    html! {
+                        <div class={classes!("center-popup-overlay", "is-active")}>
+                            <div class="center-popup-card phone-warning-popup">
+                                <button
+                                    class="center-popup-close"
+                                    type="button"
+                                    onclick={dismiss_phone_warning_popup.clone()}
+                                    aria-label="Dismiss mobile notice"
+                                ></button>
+                                <div class="center-popup-title">{"mobile notice"}</div>
+                                <div class="center-popup-body">
+                                    {MOBILE_NVIM_WARNING}
+                                </div>
+                            </div>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
         </main>
     }
 }
@@ -1824,11 +1920,10 @@ async fn run_command(
         }
         "clear" => outcome.clear = true,
         "ls" => {
-            let mut one_per_line = false;
             let mut path_arg = None::<String>;
             for arg in &args {
                 match arg.as_str() {
-                    "-1" | "--oneline" => one_per_line = true,
+                    "-1" | "--oneline" => {}
                     _ if arg.starts_with('-') => {
                         outcome
                             .lines
@@ -1854,14 +1949,17 @@ async fn run_command(
 
             match list_path(&target, &projects, dir_cache, overrides).await {
                 Ok(entries) => {
-                    let rows = if one_per_line {
-                        entries
-                            .iter()
-                            .map(|entry| vec![ls_token(entry.as_str(), 0)])
-                            .collect::<Vec<_>>()
-                    } else {
-                        format_ls_grid(&entries)
-                    };
+                    let rows = entries
+                        .iter()
+                        .map(|entry| {
+                            vec![ls_token_for_entry(
+                                entry.as_str(),
+                                0,
+                                &target,
+                                &projects,
+                            )]
+                        })
+                        .collect::<Vec<_>>();
                     if rows.is_empty() {
                         outcome.lines.push(TerminalLine::output("(empty)"));
                     } else {
@@ -2276,9 +2374,12 @@ async fn run_command(
                 .is_ok()
             {
                 let tree_entries = editor_tree_files(
+                    &target,
                     list_path(&target, &projects, dir_cache.clone(), overrides.clone())
                         .await
                         .unwrap_or_default(),
+                    0,
+                    &projects,
                 );
                 outcome.open_editor = Some(EditorState {
                     path: target.clone(),
@@ -2294,7 +2395,7 @@ async fn run_command(
                     tree_dir: target,
                     tree_entries,
                     tree_selection: 0,
-                    tree_nonce: 0,
+                    show_keybinds_help: false,
                     leader_pending: false,
                     leader_window_pending: false,
                     g_pending: false,
@@ -2347,14 +2448,16 @@ async fn run_command(
 
             let tree_dir = target[..target.len().saturating_sub(1)].to_vec();
             let tree_entries = editor_tree_files(
+                &tree_dir,
                 list_path(&tree_dir, &projects, dir_cache.clone(), overrides.clone())
                     .await
                     .unwrap_or_default(),
+                0,
+                &projects,
             );
-            let selected_name = target.last().cloned().unwrap_or_default();
             let tree_selection = tree_entries
                 .iter()
-                .position(|entry| entry.trim_end_matches('/') == selected_name.as_str())
+                .position(|entry| !entry.is_dir && entry.path == target)
                 .unwrap_or(0);
 
             outcome.open_editor = Some(EditorState {
@@ -2377,7 +2480,7 @@ async fn run_command(
                 tree_dir,
                 tree_entries,
                 tree_selection,
-                tree_nonce: 0,
+                show_keybinds_help: false,
                 leader_pending: false,
                 leader_window_pending: false,
                 g_pending: false,
@@ -3239,8 +3342,313 @@ fn ls_token(name: &str, width_ch: usize) -> LsToken {
     }
 }
 
-fn editor_tree_files(entries: Vec<String>) -> Vec<String> {
+fn editor_tree_files(
+    base_path: &[String],
+    entries: Vec<String>,
+    depth: usize,
+    projects: &[Project],
+) -> Vec<EditorTreeEntry> {
     entries
+        .into_iter()
+        .map(|entry| {
+            let is_dir = entry.ends_with('/');
+            let name = entry.trim_end_matches('/').to_string();
+            let mut path = base_path.to_vec();
+            path.push(name.clone());
+            let private_repo = is_private_repo_path(&path, projects);
+            EditorTreeEntry {
+                name,
+                path,
+                depth,
+                is_dir,
+                private_repo,
+                expanded: false,
+                loading: false,
+            }
+        })
+        .collect::<Vec<_>>()
+}
+
+fn tree_entry_label(entry: &EditorTreeEntry) -> String {
+    if entry.is_dir {
+        format!("{}/", entry.name)
+    } else {
+        entry.name.clone()
+    }
+}
+
+fn clear_tree_children(entries: &mut Vec<EditorTreeEntry>, parent_index: usize) {
+    let parent_depth = entries[parent_index].depth;
+    let mut end = parent_index + 1;
+    while end < entries.len() && entries[end].depth > parent_depth {
+        end += 1;
+    }
+    entries.drain(parent_index + 1..end);
+}
+
+fn parent_tree_index(entries: &[EditorTreeEntry], index: usize) -> Option<usize> {
+    if entries.is_empty() || index >= entries.len() {
+        return None;
+    }
+
+    let depth = entries[index].depth;
+    if depth == 0 {
+        return None;
+    }
+
+    let mut cursor = index;
+    while cursor > 0 {
+        cursor -= 1;
+        if entries[cursor].depth + 1 == depth {
+            return Some(cursor);
+        }
+    }
+
+    None
+}
+
+fn project_is_private(project: &Project) -> bool {
+    !project_has_valid_link(project)
+}
+
+fn is_private_repo_path(path: &[String], projects: &[Project]) -> bool {
+    if path.len() != 2 || path.first().map(|segment| segment.as_str()) != Some("projects") {
+        return false;
+    }
+
+    path.get(1)
+        .and_then(|repo_name| find_project(projects, repo_name.as_str()))
+        .map(project_is_private)
+        .unwrap_or(false)
+}
+
+fn is_private_repo_ls_entry(parent_path: &[String], entry_name: &str, projects: &[Project]) -> bool {
+    if parent_path.len() != 1
+        || parent_path.first().map(|segment| segment.as_str()) != Some("projects")
+    {
+        return false;
+    }
+    if !entry_name.ends_with('/') {
+        return false;
+    }
+    let repo_name = entry_name.trim_end_matches('/');
+    if repo_name.is_empty() {
+        return false;
+    }
+
+    find_project(projects, repo_name)
+        .map(project_is_private)
+        .unwrap_or(false)
+}
+
+fn ls_token_for_entry(name: &str, width_ch: usize, parent_path: &[String], projects: &[Project]) -> LsToken {
+    let mut token = ls_token(name, width_ch);
+    if is_private_repo_ls_entry(parent_path, name, projects) {
+        token.class_name = "ls-private-repo";
+    }
+    token
+}
+
+fn set_prompt_focus(prompt_input_ref: &NodeRef) {
+    if let Some(input) = prompt_input_ref.cast::<HtmlInputElement>() {
+        let _ = input.focus();
+        let len = input.value().len() as u32;
+        let _ = input.set_selection_range(len, len);
+    }
+}
+
+fn activate_tree_entry(
+    state: &mut EditorState,
+    selected_index: usize,
+    identity: Identity,
+    projects: Vec<Project>,
+    dir_cache: UseStateHandle<DirCache>,
+    file_cache: UseStateHandle<FileCache>,
+    overrides: UseStateHandle<OverrideMap>,
+    editor: UseStateHandle<Option<EditorState>>,
+) {
+    let Some(selected) = state.tree_entries.get(selected_index).cloned() else {
+        return;
+    };
+
+    state.tree_selection = selected_index.min(state.tree_entries.len().saturating_sub(1));
+
+    if selected.is_dir {
+        if selected.expanded {
+            clear_tree_children(&mut state.tree_entries, selected_index);
+            if let Some(parent) = state.tree_entries.get_mut(selected_index) {
+                parent.expanded = false;
+                parent.loading = false;
+            }
+            state.status = format!("NvimTree: {}", display_path(&selected.path));
+            return;
+        }
+
+        if let Some(parent) = state.tree_entries.get_mut(selected_index) {
+            parent.loading = true;
+        }
+        state.status = format!("NvimTree: loading {}", display_path(&selected.path));
+        let selected_path = selected.path.clone();
+        let dir_cache = dir_cache.clone();
+        let overrides = overrides.clone();
+        let editor_for_async = editor.clone();
+
+        spawn_local(async move {
+            match list_path(&selected_path, &projects, dir_cache, overrides).await {
+                Ok(entries) => {
+                    if let Some(mut live) = (*editor_for_async).clone() {
+                        let Some(index) = live
+                            .tree_entries
+                            .iter()
+                            .position(|entry| entry.path == selected_path)
+                        else {
+                            return;
+                        };
+
+                        clear_tree_children(&mut live.tree_entries, index);
+                        let child_depth = live.tree_entries[index].depth + 1;
+                        let children =
+                            editor_tree_files(&selected_path, entries, child_depth, &projects);
+                        live.tree_entries.splice(index + 1..index + 1, children);
+                        if let Some(entry) = live.tree_entries.get_mut(index) {
+                            entry.expanded = true;
+                            entry.loading = false;
+                        }
+                        live.tree_selection = index.min(live.tree_entries.len().saturating_sub(1));
+                        live.tree_focused = true;
+                        live.status = format!("NvimTree: {}", display_path(&selected_path));
+                        editor_for_async.set(Some(live));
+                    }
+                }
+                Err(error) => {
+                    if let Some(mut live) = (*editor_for_async).clone() {
+                        if let Some(index) = live
+                            .tree_entries
+                            .iter()
+                            .position(|entry| entry.path == selected_path)
+                        {
+                            if let Some(entry) = live.tree_entries.get_mut(index) {
+                                entry.loading = false;
+                            }
+                        }
+                        live.status = format!(
+                            "NvimTree error ({}): {error}",
+                            display_path(&selected_path)
+                        );
+                        editor_for_async.set(Some(live));
+                    }
+                }
+            }
+        });
+        return;
+    }
+
+    let requested_file = selected.path.clone();
+    state.status = format!("opening {}", display_path(&requested_file));
+
+    let editor_for_async = editor.clone();
+    let file_cache = file_cache.clone();
+    let overrides = overrides.clone();
+    let dir_cache_for_async = dir_cache.clone();
+    spawn_local(async move {
+        match cat_path(
+            &requested_file,
+            &identity,
+            &projects,
+            file_cache,
+            overrides.clone(),
+        )
+        .await
+        {
+            Ok(content) => {
+                if let Some(mut live) = (*editor_for_async).clone() {
+                    let Some(index) = live
+                        .tree_entries
+                        .iter()
+                        .position(|entry| entry.path == requested_file)
+                    else {
+                        return;
+                    };
+                    live.path = requested_file.clone();
+                    live.content = content;
+                    live.cursor = 0;
+                    live.preferred_column = None;
+                    live.mode = EditorMode::Normal;
+                    live.status = format!("opened {}", display_path(&live.path));
+                    live.dirty = false;
+                    live.tree_selection = index;
+                    live.tree_focused = false;
+                    live.leader_pending = false;
+                    live.leader_window_pending = false;
+                    live.g_pending = false;
+                    editor_for_async.set(Some(live));
+                }
+            }
+            Err(error) => {
+                if error.contains("is a directory") {
+                    match list_path(
+                        &requested_file,
+                        &projects,
+                        dir_cache_for_async,
+                        overrides.clone(),
+                    )
+                    .await
+                    {
+                        Ok(entries) => {
+                            if let Some(mut live) = (*editor_for_async).clone() {
+                                let Some(index) = live
+                                    .tree_entries
+                                    .iter()
+                                    .position(|entry| entry.path == requested_file)
+                                else {
+                                    return;
+                                };
+
+                                if let Some(current) = live.tree_entries.get_mut(index) {
+                                    current.is_dir = true;
+                                }
+                                clear_tree_children(&mut live.tree_entries, index);
+                                let child_depth = live.tree_entries[index].depth + 1;
+                                let children = editor_tree_files(
+                                    &requested_file,
+                                    entries,
+                                    child_depth,
+                                    &projects,
+                                );
+                                live.tree_entries.splice(index + 1..index + 1, children);
+                                if let Some(current) = live.tree_entries.get_mut(index) {
+                                    current.expanded = true;
+                                    current.loading = false;
+                                }
+                                live.tree_selection = index;
+                                live.tree_focused = true;
+                                live.status =
+                                    format!("NvimTree: {}", display_path(&requested_file));
+                                editor_for_async.set(Some(live));
+                            }
+                        }
+                        Err(list_error) => {
+                            if let Some(mut live) = (*editor_for_async).clone() {
+                                live.status = format!(
+                                    "NvimTree error ({}): {list_error}",
+                                    display_path(&requested_file)
+                                );
+                                editor_for_async.set(Some(live));
+                            }
+                        }
+                    }
+                    return;
+                }
+                if let Some(mut live) = (*editor_for_async).clone() {
+                    live.status = format!(
+                        "NvimTree error ({}): {error}",
+                        display_path(&requested_file)
+                    );
+                    editor_for_async.set(Some(live));
+                }
+            }
+        }
+    });
 }
 
 fn merge_virtual_entries(entries: &mut Vec<String>, dir_path: &[String], overrides: &OverrideMap) {
@@ -3396,11 +3804,9 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
         identity.focus.join(" | ")
     )));
 
-    lines.push(TerminalLine::section("[featured projects]"));
-    let featured = projects
-        .iter()
-        .filter(|project| project.featured)
-        .collect::<Vec<_>>();
+    let (featured, remaining) = prioritized_project_sections(projects);
+
+    lines.push(TerminalLine::section("[projects]"));
     if featured.is_empty() {
         lines.push(TerminalLine::muted("(none)"));
     } else {
@@ -3408,11 +3814,6 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
             lines.push(TerminalLine::project(project));
         }
     }
-
-    let remaining = projects
-        .iter()
-        .filter(|project| !project.featured)
-        .collect::<Vec<_>>();
 
     if !remaining.is_empty() {
         lines.push(TerminalLine::section("[other projects]"));
@@ -3441,6 +3842,8 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
 }
 
 fn about_text(identity: &Identity, projects: &[Project]) -> String {
+    let (featured, remaining) = prioritized_project_sections(projects);
+
     let mut output = Vec::new();
     output.push(format!("handle: {}", identity.handle));
     output.push(format!("aliases: {}", identity.aliases.join(", ")));
@@ -3448,9 +3851,9 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
     output.push(format!("location: {}", identity.location));
     output.push(format!("focus: {}", identity.focus.join(" | ")));
     output.push(String::new());
-    output.push(String::from("featured projects:"));
+    output.push(String::from("projects:"));
 
-    for project in projects.iter().filter(|project| project.featured) {
+    for project in featured {
         output.push(format!(
             "- {}{} [{}] - {}",
             project.name,
@@ -3458,6 +3861,19 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
             project.primary_stack,
             project.description
         ));
+    }
+    if !remaining.is_empty() {
+        output.push(String::new());
+        output.push(String::from("other projects:"));
+        for project in remaining {
+            output.push(format!(
+                "- {}{} [{}] - {}",
+                project.name,
+                project_badge_text(project),
+                project.primary_stack,
+                project.description
+            ));
+        }
     }
     output.push(String::new());
     output.push(String::from("legend:"));
@@ -3469,6 +3885,46 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
     output.push(format!("scope: {}", identity.scope_note));
     output.push(format!("snapshot: {}", identity.snapshot_date));
     output.join("\n")
+}
+
+fn prioritized_project_sections<'a>(projects: &'a [Project]) -> (Vec<&'a Project>, Vec<&'a Project>) {
+    let mut featured = Vec::new();
+    let mut selected = HashSet::new();
+
+    for project in projects
+        .iter()
+        .filter(|project| resolved_project_context(project) == ProjectContext::Professional)
+    {
+        if selected.insert(project_list_key(project)) {
+            featured.push(project);
+        }
+    }
+
+    for project in projects
+        .iter()
+        .filter(|project| project_has_valid_link(project) && project.era != ProjectEra::Legacy)
+    {
+        if selected.insert(project_list_key(project)) {
+            featured.push(project);
+        }
+    }
+
+    let mut remaining = Vec::new();
+    for project in projects {
+        if !selected.contains(&project_list_key(project)) {
+            remaining.push(project);
+        }
+    }
+
+    (featured, remaining)
+}
+
+fn project_list_key(project: &Project) -> String {
+    format!(
+        "{}:{}",
+        project.owner.to_ascii_lowercase(),
+        project.name.to_ascii_lowercase()
+    )
 }
 
 fn project_meta(project: &Project) -> String {
@@ -3650,10 +4106,23 @@ fn project_matches_filters(project: &Project, filters: &ProjectFilters) -> bool 
 fn render_line(line: &TerminalLine) -> Html {
     match line.kind {
         LineKind::Ls => html! {
-            <p class="line line-ls">
-                {for line.ls_tokens.iter().map(render_ls_token)}
-            </p>
+            <div class="line line-ls-list">
+                {for line.ls_tokens.iter().map(|token| html! {
+                    <div class="line-ls-row">{render_ls_token(token)}</div>
+                })}
+            </div>
         },
+        LineKind::Section => {
+            if line.text == "[other projects]" {
+                html! {
+                    <div class="line line-section-divider">
+                        <span>{"other projects"}</span>
+                    </div>
+                }
+            } else {
+                html! { <p class="line line-section">{line.text.clone()}</p> }
+            }
+        }
         LineKind::Project => {
             if let Some(project) = line.project.as_ref() {
                 render_project_line(project)
@@ -3673,11 +4142,11 @@ fn render_line(line: &TerminalLine) -> Html {
                 LineKind::Command => "line line-command",
                 LineKind::Output => "line line-output",
                 LineKind::Error => "line line-error",
-                LineKind::Section => "line line-section",
                 LineKind::Muted => "line line-muted",
                 LineKind::Ls => "line",
                 LineKind::Project => "line",
                 LineKind::Legend => "line",
+                LineKind::Section => "line",
             };
 
             html! { <p class={class}>{line.text.clone()}</p> }
@@ -3700,13 +4169,40 @@ fn render_ls_token(token: &LsToken) -> Html {
     }
 }
 
-fn render_tree_entry(_index: usize, entry: &str, selected: bool) -> Html {
-    let token = ls_token(entry, 0);
+fn render_tree_entry(
+    index: usize,
+    entry: &EditorTreeEntry,
+    selected: bool,
+    on_click: Callback<MouseEvent>,
+) -> Html {
+    let token = ls_token(tree_entry_label(entry).as_str(), 0);
+    let depth_style = AttrValue::from(format!("padding-left: {}ch;", entry.depth * 2));
+    let fold_marker = if entry.is_dir {
+        if entry.loading {
+            "~"
+        } else if entry.expanded {
+            "v"
+        } else {
+            ">"
+        }
+    } else {
+        " "
+    };
     html! {
-        <div class={classes!("tree-entry", token.class_name, if selected { "is-selected" } else { "" })}>
+        <div
+            class={classes!(
+                "tree-entry",
+                token.class_name,
+                if entry.private_repo { "tree-private-repo" } else { "" },
+                if selected { "is-selected" } else { "" }
+            )}
+            data-index={index.to_string()}
+            onclick={on_click}
+        >
             <span class="tree-cursor">{if selected { ">" } else { " " }}</span>
+            <span class="tree-fold">{fold_marker}</span>
             <span class="tree-icon">{token.icon}</span>
-            <span class="tree-name">{token.name}</span>
+            <span class="tree-name" style={depth_style}>{token.name}</span>
         </div>
     }
 }
