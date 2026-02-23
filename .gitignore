@@ -3,3 +3,4 @@ frontend/dist
 frontend/.trunk
 frontend/target
 tmp/
+.env
