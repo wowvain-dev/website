@@ -101,8 +101,8 @@ body {
 
 .frame {
   position: relative;
-  width: min(1060px, calc(100vw - 1.4rem));
-  height: min(64svh, 900px);
+  width: min(1220px, calc(100vw - 1.4rem));
+  height: min(58svh, 900px);
   zoom: 1.5;
   margin: auto;
   display: flex;
@@ -211,6 +211,7 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 1rem 1.05rem;
+  text-align: center;
   scroll-behavior: smooth;
 }
 
@@ -218,6 +219,7 @@ body {
   margin: 0.18rem 0;
   white-space: pre-wrap;
   word-break: break-word;
+  text-align: left;
 }
 
 .line-command {
@@ -226,6 +228,11 @@ body {
 
 .line-output {
   color: var(--text);
+}
+
+.line-social-output {
+  display: inline-flex;
+  margin: 0.18rem 0.65rem;
 }
 
 .line-output-link {
@@ -246,6 +253,15 @@ body {
 .line-output-link.social-link-github:hover,
 .line-output-link.social-link-github:focus-visible {
   color: #f0f6fc;
+}
+
+.line-output-link.social-link-gitlab {
+  color: #fc6d26;
+}
+
+.line-output-link.social-link-gitlab:hover,
+.line-output-link.social-link-gitlab:focus-visible {
+  color: #ff9f6d;
 }
 
 .line-output-link.social-link-twitter {
@@ -1126,7 +1142,7 @@ a.project-name:focus-visible {
 
   .frame {
     width: calc(100vw - 0.3rem);
-    height: 64svh;
+    height: 58svh;
     margin: 0;
   }
 

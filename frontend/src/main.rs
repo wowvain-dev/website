@@ -3810,10 +3810,7 @@ fn socials_lines() -> Vec<TerminalLine> {
     vec![
         TerminalLine::section("[socials]"),
         TerminalLine::output_link(" github: wowvain-dev", "https://github.com/wowvain-dev"),
-        TerminalLine::output_link(" twitter: @thewowvain", "https://twitter.com/thewowvain"),
-        TerminalLine::output_link(" instagram: @wowvain", "https://instagram.com/wowvain"),
-        TerminalLine::output_link(" youtube: @wowvain", "https://youtube.com/@wowvain"),
-        TerminalLine::output_link(" twitch: wowVAIN", "https://twitch.tv/wowVAIN"),
+        TerminalLine::output_link(" gitlab: wowvain-dev", "https://gitlab.com/wowvain-dev"),
     ]
 }
 
@@ -4149,13 +4146,19 @@ fn render_line(line: &TerminalLine) -> Html {
         LineKind::Identity => render_identity_line(line.text.as_str()),
         _ => {
             if let Some(href) = line.link.as_ref() {
-                let class = if let Some(social_class) = social_link_class(href.as_str()) {
-                    classes!("line-output-link", social_class)
+                let social_class = social_link_class(href.as_str());
+                let class = if let Some(class_name) = social_class {
+                    classes!("line-output-link", class_name)
                 } else {
                     classes!("line-output-link")
                 };
+                let line_class = if social_class.is_some() {
+                    classes!("line", "line-output", "line-social-output")
+                } else {
+                    classes!("line", "line-output")
+                };
                 return html! {
-                    <p class="line line-output">
+                    <p class={line_class}>
                         <a class={class} href={href.clone()} target="_blank" rel="noopener noreferrer">{line.text.clone()}</a>
                     </p>
                 };
@@ -4180,6 +4183,8 @@ fn render_line(line: &TerminalLine) -> Html {
 fn social_link_class(href: &str) -> Option<&'static str> {
     if href.contains("github.com") {
         Some("social-link-github")
+    } else if href.contains("gitlab.com") {
+        Some("social-link-gitlab")
     } else if href.contains("twitter.com") || href.contains("x.com") {
         Some("social-link-twitter")
     } else if href.contains("instagram.com") {
