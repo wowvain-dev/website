@@ -3809,11 +3809,11 @@ fn help_lines() -> Vec<TerminalLine> {
 fn socials_lines() -> Vec<TerminalLine> {
     vec![
         TerminalLine::section("[socials]"),
-        TerminalLine::output_link("github: wowvain-dev", "https://github.com/wowvain-dev"),
-        TerminalLine::output_link("twitter: @thewowvain", "https://twitter.com/thewowvain"),
-        TerminalLine::output_link("instagram: @wowvain", "https://instagram.com/wowvain"),
-        TerminalLine::output_link("youtube: @wowvain", "https://youtube.com/@wowvain"),
-        TerminalLine::output_link("twitch: wowVAIN", "https://twitch.tv/wowVAIN"),
+        TerminalLine::output_link(" github: wowvain-dev", "https://github.com/wowvain-dev"),
+        TerminalLine::output_link(" twitter: @thewowvain", "https://twitter.com/thewowvain"),
+        TerminalLine::output_link(" instagram: @wowvain", "https://instagram.com/wowvain"),
+        TerminalLine::output_link(" youtube: @wowvain", "https://youtube.com/@wowvain"),
+        TerminalLine::output_link(" twitch: wowVAIN", "https://twitch.tv/wowVAIN"),
     ]
 }
 
@@ -4149,9 +4149,14 @@ fn render_line(line: &TerminalLine) -> Html {
         LineKind::Identity => render_identity_line(line.text.as_str()),
         _ => {
             if let Some(href) = line.link.as_ref() {
+                let class = if let Some(social_class) = social_link_class(href.as_str()) {
+                    classes!("line-output-link", social_class)
+                } else {
+                    classes!("line-output-link")
+                };
                 return html! {
                     <p class="line line-output">
-                        <a class="line-output-link" href={href.clone()} target="_blank" rel="noopener noreferrer">{line.text.clone()}</a>
+                        <a class={class} href={href.clone()} target="_blank" rel="noopener noreferrer">{line.text.clone()}</a>
                     </p>
                 };
             }
@@ -4169,6 +4174,22 @@ fn render_line(line: &TerminalLine) -> Html {
 
             html! { <p class={class}>{line.text.clone()}</p> }
         }
+    }
+}
+
+fn social_link_class(href: &str) -> Option<&'static str> {
+    if href.contains("github.com") {
+        Some("social-link-github")
+    } else if href.contains("twitter.com") || href.contains("x.com") {
+        Some("social-link-twitter")
+    } else if href.contains("instagram.com") {
+        Some("social-link-instagram")
+    } else if href.contains("youtube.com") || href.contains("youtu.be") {
+        Some("social-link-youtube")
+    } else if href.contains("twitch.tv") {
+        Some("social-link-twitch")
+    } else {
+        None
     }
 }
 

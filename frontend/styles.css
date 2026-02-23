@@ -238,6 +238,51 @@ body {
   text-decoration: underline;
 }
 
+.line-output-link.social-link-github {
+  color: #c9d1d9;
+}
+
+.line-output-link.social-link-github:hover,
+.line-output-link.social-link-github:focus-visible {
+  color: #f0f6fc;
+}
+
+.line-output-link.social-link-twitter {
+  color: #1d9bf0;
+}
+
+.line-output-link.social-link-twitter:hover,
+.line-output-link.social-link-twitter:focus-visible {
+  color: #7cc7ff;
+}
+
+.line-output-link.social-link-instagram {
+  color: #e4405f;
+}
+
+.line-output-link.social-link-instagram:hover,
+.line-output-link.social-link-instagram:focus-visible {
+  color: #ff7f95;
+}
+
+.line-output-link.social-link-youtube {
+  color: #ff3b30;
+}
+
+.line-output-link.social-link-youtube:hover,
+.line-output-link.social-link-youtube:focus-visible {
+  color: #ff7b73;
+}
+
+.line-output-link.social-link-twitch {
+  color: #9146ff;
+}
+
+.line-output-link.social-link-twitch:hover,
+.line-output-link.social-link-twitch:focus-visible {
+  color: #b18cff;
+}
+
 .line-identity {
   --identity-label-color: rgba(139, 172, 206, 0.95);
   --identity-value-color: rgba(205, 222, 241, 0.88);
