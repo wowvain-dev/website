@@ -8,15 +8,16 @@ use gloo_net::http::Request;
 use gloo_timers::{callback::Interval, future::TimeoutFuture};
 use serde::Deserialize;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{Element, Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent};
+use web_sys::{
+    Element, Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent,
+};
 use yew::prelude::*;
 
 type DirCache = HashMap<String, Vec<RepoEntry>>;
 type FileCache = HashMap<String, String>;
 type OverrideMap = HashMap<String, String>;
 const MOBILE_NVIM_WARNING: &str = "nvim texteditor functionality is incompatible with phones";
-const STUDIES_LINE: &str =
-    "bachelor: computer science & engineering year 2 @ delft university of technology";
+const STUDIES_LINE: &str = "bachelor: computer science & engineering | year 2 @ tudelft";
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 struct Identity {
@@ -197,7 +198,10 @@ impl TerminalLine {
             project: None,
             legend: Some(LegendRow {
                 label: label.into(),
-                badges: badges.iter().map(|badge| (*badge).to_string()).collect::<Vec<_>>(),
+                badges: badges
+                    .iter()
+                    .map(|badge| (*badge).to_string())
+                    .collect::<Vec<_>>(),
             }),
         }
     }
@@ -1051,20 +1055,24 @@ fn app() -> Html {
                                 editor.set(Some(state));
                             }
                             "h" | "ArrowLeft" => {
-                                let current_index =
-                                    state.tree_selection.min(state.tree_entries.len().saturating_sub(1));
+                                let current_index = state
+                                    .tree_selection
+                                    .min(state.tree_entries.len().saturating_sub(1));
                                 if let Some(current_entry) =
                                     state.tree_entries.get(current_index).cloned()
                                 {
                                     if current_entry.is_dir && current_entry.expanded {
                                         clear_tree_children(&mut state.tree_entries, current_index);
-                                        if let Some(entry) = state.tree_entries.get_mut(current_index)
+                                        if let Some(entry) =
+                                            state.tree_entries.get_mut(current_index)
                                         {
                                             entry.expanded = false;
                                             entry.loading = false;
                                         }
-                                        state.status =
-                                            format!("NvimTree: {}", display_path(&current_entry.path));
+                                        state.status = format!(
+                                            "NvimTree: {}",
+                                            display_path(&current_entry.path)
+                                        );
                                         editor.set(Some(state));
                                         return;
                                     }
@@ -1086,7 +1094,8 @@ fn app() -> Html {
                                     state.status = String::from("NvimTree: /");
                                     editor.set(Some(state));
                                 } else {
-                                    let parent = state.tree_dir[..state.tree_dir.len() - 1].to_vec();
+                                    let parent =
+                                        state.tree_dir[..state.tree_dir.len() - 1].to_vec();
                                     state.status =
                                         format!("NvimTree: loading {}", display_path(&parent));
                                     let projects_data = (*projects).clone();
@@ -1105,7 +1114,8 @@ fn app() -> Html {
                                         .await
                                         {
                                             Ok(entries) => {
-                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                if let Some(mut live) = (*editor_for_async).clone()
+                                                {
                                                     live.tree_dir = requested_dir.clone();
                                                     live.tree_entries = editor_tree_files(
                                                         &requested_dir,
@@ -1123,7 +1133,8 @@ fn app() -> Html {
                                                 }
                                             }
                                             Err(error) => {
-                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                if let Some(mut live) = (*editor_for_async).clone()
+                                                {
                                                     live.status = format!(
                                                         "NvimTree error ({}): {error}",
                                                         display_path(&requested_dir)
@@ -1957,12 +1968,7 @@ async fn run_command(
                     let rows = entries
                         .iter()
                         .map(|entry| {
-                            vec![ls_token_for_entry(
-                                entry.as_str(),
-                                0,
-                                &target,
-                                &projects,
-                            )]
+                            vec![ls_token_for_entry(entry.as_str(), 0, &target, &projects)]
                         })
                         .collect::<Vec<_>>();
                     if rows.is_empty() {
@@ -3427,7 +3433,11 @@ fn is_private_repo_path(path: &[String], projects: &[Project]) -> bool {
         .unwrap_or(false)
 }
 
-fn is_private_repo_ls_entry(parent_path: &[String], entry_name: &str, projects: &[Project]) -> bool {
+fn is_private_repo_ls_entry(
+    parent_path: &[String],
+    entry_name: &str,
+    projects: &[Project],
+) -> bool {
     if parent_path.len() != 1
         || parent_path.first().map(|segment| segment.as_str()) != Some("projects")
     {
@@ -3446,7 +3456,12 @@ fn is_private_repo_ls_entry(parent_path: &[String], entry_name: &str, projects: 
         .unwrap_or(false)
 }
 
-fn ls_token_for_entry(name: &str, width_ch: usize, parent_path: &[String], projects: &[Project]) -> LsToken {
+fn ls_token_for_entry(
+    name: &str,
+    width_ch: usize,
+    parent_path: &[String],
+    projects: &[Project],
+) -> LsToken {
     let mut token = ls_token(name, width_ch);
     if is_private_repo_ls_entry(parent_path, name, projects) {
         token.class_name = "ls-private-repo";
@@ -3536,10 +3551,8 @@ fn activate_tree_entry(
                                 entry.loading = false;
                             }
                         }
-                        live.status = format!(
-                            "NvimTree error ({}): {error}",
-                            display_path(&selected_path)
-                        );
+                        live.status =
+                            format!("NvimTree error ({}): {error}", display_path(&selected_path));
                         editor_for_async.set(Some(live));
                     }
                 }
@@ -3894,7 +3907,9 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
     output.join("\n")
 }
 
-fn prioritized_project_sections<'a>(projects: &'a [Project]) -> (Vec<&'a Project>, Vec<&'a Project>) {
+fn prioritized_project_sections<'a>(
+    projects: &'a [Project],
+) -> (Vec<&'a Project>, Vec<&'a Project>) {
     let mut featured = Vec::new();
     let mut selected = HashSet::new();
 
