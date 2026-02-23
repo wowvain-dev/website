@@ -19,8 +19,6 @@ async fn main() {
         projects: Arc::new(project_data()),
     };
 
-    print
-
     let app = Router::new()
         .route("/api/identity", get(identity))
         .route("/api/projects", get(projects))

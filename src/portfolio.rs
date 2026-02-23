@@ -18,18 +18,25 @@ pub struct Project {
     pub url: &'static str,
     pub description: &'static str,
     pub primary_stack: &'static str,
-    pub source: ProjectSource,
+    pub team: ProjectTeam,
+    pub context: ProjectContext,
     pub era: ProjectEra,
     pub featured: bool,
-    pub work_in_progress: bool,
 }
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProjectSource {
-    University,
+pub enum ProjectTeam {
     Solo,
     Team,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectContext {
+    Personal,
+    University,
+    Professional,
 }
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq)]
@@ -63,10 +70,10 @@ const PROJECTS: [Project; 8] = [
         url: "",
         description: "Data-driven Odin game engine with a SOKOL backend and editor tooling.",
         primary_stack: "Odin",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::Professional,
         era: ProjectEra::Current,
         featured: true,
-        work_in_progress: true,
     },
     Project {
         name: "threnody_of_souls",
@@ -74,10 +81,10 @@ const PROJECTS: [Project; 8] = [
         url: "",
         description: "Threnody of Souls is an isometric ARPG built as a roguelike with deep systems inspired by Path of Exile and Diablo 2.",
         primary_stack: "C# + Godot",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::Professional,
         era: ProjectEra::Current,
         featured: true,
-        work_in_progress: true,
     },
     Project {
         name: "net_note",
@@ -85,10 +92,10 @@ const PROJECTS: [Project; 8] = [
         url: "",
         description: "Distributed note-taking platform built in collaboration with a small team of students at TU Delft.",
         primary_stack: "Java + Spring Boot + JavaFX + WebSockets + REST",
-        source: ProjectSource::University,
+        team: ProjectTeam::Team,
+        context: ProjectContext::University,
         era: ProjectEra::Current,
         featured: true,
-        work_in_progress: false,
     },
     Project {
         name: "cpu_raytracer",
@@ -96,10 +103,10 @@ const PROJECTS: [Project; 8] = [
         url: "",
         description: "CPU-based raytracer implemented in C++ with OpenGL. Built mainly for testing theoretical concepts studied in Computer Graphics.",
         primary_stack: "C++ + OpenGL",
-        source: ProjectSource::University,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::University,
         era: ProjectEra::Current,
         featured: true,
-        work_in_progress: false,
     },
     Project {
         name: "othello_nasm",
@@ -107,10 +114,10 @@ const PROJECTS: [Project; 8] = [
         url: "https://github.com/wowvain-dev/othello-nasm",
         description: "Terminal Othello implementation in NASM with ncurses.",
         primary_stack: "Assembly",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::Personal,
         era: ProjectEra::Current,
         featured: true,
-        work_in_progress: false,
     },
     Project {
         name: "tebo",
@@ -118,10 +125,10 @@ const PROJECTS: [Project; 8] = [
         url: "https://github.com/wowvain-dev/TeBo",
         description: "Interactive educational desktop application for children with learning difficulties.",
         primary_stack: "TypeScript + Electron + React",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Team,
+        context: ProjectContext::University,
         era: ProjectEra::Legacy,
         featured: true,
-        work_in_progress: false,
     },
     Project {
         name: "vainos_config",
@@ -129,10 +136,10 @@ const PROJECTS: [Project; 8] = [
         url: "https://github.com/wowvain-dev/vainos-config",
         description: "NixOS configuration repository with flakes and home-manager progression.",
         primary_stack: "Nix",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::Personal,
         era: ProjectEra::Current,
         featured: false,
-        work_in_progress: false,
     },
     Project {
         name: "db_cli-rs",
@@ -140,10 +147,10 @@ const PROJECTS: [Project; 8] = [
         url: "https://github.com/wowvain-dev/db_cli-rs",
         description: "Playing around with a rust TUI library. It's a primitive file I/O example.",
         primary_stack: "Rust",
-        source: ProjectSource::Solo,
+        team: ProjectTeam::Solo,
+        context: ProjectContext::Personal,
         era: ProjectEra::Legacy,
         featured: false,
-        work_in_progress: false,
     },
 ];
 

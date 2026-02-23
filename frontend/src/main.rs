@@ -7,13 +7,14 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use gloo_net::http::Request;
 use gloo_timers::{callback::Interval, future::TimeoutFuture};
 use serde::Deserialize;
-use wasm_bindgen_futures::spawn_local;
-use web_sys::{Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent};
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use web_sys::{Element, Event, HtmlElement, HtmlInputElement, HtmlTextAreaElement, KeyboardEvent, MouseEvent};
 use yew::prelude::*;
 
 type DirCache = HashMap<String, Vec<RepoEntry>>;
 type FileCache = HashMap<String, String>;
 type OverrideMap = HashMap<String, String>;
+const MOBILE_NVIM_WARNING: &str = "nvim texteditor functionality is incompatible with phones";
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 struct Identity {
@@ -33,15 +34,34 @@ struct Project {
     url: String,
     description: String,
     primary_stack: String,
-    source: ProjectSource,
+    #[serde(default)]
+    team: Option<ProjectTeam>,
+    #[serde(default)]
+    context: Option<ProjectContext>,
+    #[serde(default)]
+    source: Option<ProjectSourceLegacy>,
     era: ProjectEra,
     featured: bool,
-    work_in_progress: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum ProjectSource {
+enum ProjectTeam {
+    Solo,
+    Team,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProjectContext {
+    Personal,
+    University,
+    Professional,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ProjectSourceLegacy {
     University,
     Solo,
     Team,
@@ -63,6 +83,7 @@ enum LineKind {
     Muted,
     Ls,
     Project,
+    Legend,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -79,6 +100,20 @@ struct TerminalLine {
     text: String,
     ls_tokens: Vec<LsToken>,
     project: Option<Project>,
+    legend: Option<LegendRow>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct LegendRow {
+    label: String,
+    badges: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ProjectFilters {
+    team: Option<ProjectTeam>,
+    context: Option<ProjectContext>,
+    legacy_only: bool,
 }
 
 impl TerminalLine {
@@ -88,6 +123,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            legend: None,
         }
     }
 
@@ -97,6 +133,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            legend: None,
         }
     }
 
@@ -106,6 +143,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            legend: None,
         }
     }
 
@@ -115,6 +153,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            legend: None,
         }
     }
 
@@ -124,6 +163,7 @@ impl TerminalLine {
             text: text.into(),
             ls_tokens: Vec::new(),
             project: None,
+            legend: None,
         }
     }
 
@@ -133,6 +173,7 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: tokens,
             project: None,
+            legend: None,
         }
     }
 
@@ -142,6 +183,20 @@ impl TerminalLine {
             text: String::new(),
             ls_tokens: Vec::new(),
             project: Some(project.clone()),
+            legend: None,
+        }
+    }
+
+    fn legend(label: impl Into<String>, badges: &[&str]) -> Self {
+        Self {
+            kind: LineKind::Legend,
+            text: String::new(),
+            ls_tokens: Vec::new(),
+            project: None,
+            legend: Some(LegendRow {
+                label: label.into(),
+                badges: badges.iter().map(|badge| (*badge).to_string()).collect::<Vec<_>>(),
+            }),
         }
     }
 }
@@ -174,7 +229,6 @@ impl Reducible for TerminalState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum BootPhase {
     Blinking,
-    Typing,
     Ready,
 }
 
@@ -287,6 +341,7 @@ struct HlToken {
 
 #[function_component(App)]
 fn app() -> Html {
+    let is_phone_client = is_phone_device();
     let identity = use_state(|| None::<Identity>);
     let projects = use_state(Vec::<Project>::new);
     let terminal = use_reducer(|| TerminalState { lines: Vec::new() });
@@ -294,7 +349,9 @@ fn app() -> Html {
     let prompt_input_ref = use_node_ref();
     let cwd = use_state(Vec::<String>::new);
     let boot_phase = use_state(|| BootPhase::Blinking);
-    let boot_input = use_state(String::new);
+    let auto_scroll_terminal = use_state(|| false);
+    let font_loading = use_state(|| true);
+    let prompt_spotlight = use_state(|| false);
     let cursor_on = use_state(|| true);
     let command_input = use_state(String::new);
     let completion_lines = use_state(Vec::<TerminalLine>::new);
@@ -303,12 +360,24 @@ fn app() -> Html {
     let file_cache = use_state(HashMap::<String, String>::new);
     let overrides = use_state(HashMap::<String, String>::new);
     let history = use_state(Vec::<String>::new);
+    let project_filters = use_state(ProjectFilters::default);
     let editor = use_state(|| None::<EditorState>);
     let editor_ref = use_node_ref();
     let editor_highlight_ref = use_node_ref();
     let editor_gutter_ref = use_node_ref();
     let editor_tree_ref = use_node_ref();
     let editor_command_ref = use_node_ref();
+
+    {
+        let font_loading = font_loading.clone();
+        use_effect_with((), move |_| {
+            spawn_local(async move {
+                wait_for_initial_fonts().await;
+                font_loading.set(false);
+            });
+            || ()
+        });
+    }
 
     {
         let cursor_on = cursor_on.clone();
@@ -325,8 +394,9 @@ fn app() -> Html {
         let projects = projects.clone();
         let terminal = terminal.clone();
         let boot_phase = boot_phase.clone();
-        let boot_input = boot_input.clone();
+        let prompt_spotlight = prompt_spotlight.clone();
         let cwd = cwd.clone();
+        let is_phone_client = is_phone_client;
 
         use_effect_with((), move |_| {
             spawn_local(async move {
@@ -354,25 +424,14 @@ fn app() -> Html {
                 projects.set(fetched_projects.clone());
                 cwd.set(vec![String::from("projects")]);
 
-                TimeoutFuture::new(1300).await;
-                boot_phase.set(BootPhase::Typing);
-
-                let mut typed = String::new();
-                for character in "about".chars() {
-                    typed.push(character);
-                    boot_input.set(typed.clone());
-                    TimeoutFuture::new(120).await;
-                }
-
-                TimeoutFuture::new(180).await;
-                terminal.dispatch(TerminalAction::Append(vec![TerminalLine::command(
-                    "wowvain@kaaldur:/projects$ about",
-                )]));
-                terminal.dispatch(TerminalAction::Append(about_lines(
-                    &fetched_identity,
-                    &fetched_projects,
-                )));
                 boot_phase.set(BootPhase::Ready);
+                if is_phone_client {
+                    terminal.dispatch(TerminalAction::Append(vec![TerminalLine::error(
+                        MOBILE_NVIM_WARNING,
+                    )]));
+                }
+                TimeoutFuture::new(420).await;
+                prompt_spotlight.set(true);
             });
             || ()
         });
@@ -381,9 +440,12 @@ fn app() -> Html {
     {
         let output_ref = output_ref.clone();
         let line_count = terminal.lines.len();
-        use_effect_with(line_count, move |_| {
-            if let Some(element) = output_ref.cast::<HtmlElement>() {
-                element.set_scroll_top(element.scroll_height());
+        let auto_scroll = *auto_scroll_terminal;
+        use_effect_with((line_count, auto_scroll), move |_| {
+            if auto_scroll {
+                if let Some(element) = output_ref.cast::<HtmlElement>() {
+                    element.set_scroll_top(element.scroll_height());
+                }
             }
             || ()
         });
@@ -439,10 +501,14 @@ fn app() -> Html {
     let oninput = {
         let command_input = command_input.clone();
         let completion_lines = completion_lines.clone();
+        let prompt_spotlight = prompt_spotlight.clone();
         Callback::from(move |event: InputEvent| {
             let target: HtmlInputElement = event.target_unchecked_into();
             command_input.set(target.value());
             completion_lines.set(Vec::new());
+            if *prompt_spotlight {
+                prompt_spotlight.set(false);
+            }
         })
     };
 
@@ -500,8 +566,12 @@ fn app() -> Html {
         let file_cache = file_cache.clone();
         let overrides = overrides.clone();
         let history = history.clone();
+        let auto_scroll_terminal = auto_scroll_terminal.clone();
+        let output_ref = output_ref.clone();
+        let prompt_spotlight = prompt_spotlight.clone();
         let editor = editor.clone();
         let completion_lines = completion_lines.clone();
+        let is_phone_client = is_phone_client;
 
         Callback::from(move |event: SubmitEvent| {
             event.prevent_default();
@@ -515,6 +585,16 @@ fn app() -> Html {
                 return;
             }
 
+            let keep_top_for_about = raw
+                .split_whitespace()
+                .next()
+                .map(|command| command == "about")
+                .unwrap_or(false);
+
+            auto_scroll_terminal.set(!keep_top_for_about);
+            if *prompt_spotlight {
+                prompt_spotlight.set(false);
+            }
             let command_line = format!("{}{}", format_prompt(cwd.as_ref()), raw);
             terminal.dispatch(TerminalAction::Append(vec![TerminalLine::command(
                 command_line,
@@ -532,6 +612,7 @@ fn app() -> Html {
             let dir_cache = dir_cache.clone();
             let file_cache = file_cache.clone();
             let overrides = overrides.clone();
+            let output_ref = output_ref.clone();
             let editor = editor.clone();
 
             let mut next_history = (*history).clone();
@@ -548,6 +629,7 @@ fn app() -> Html {
                     dir_cache,
                     file_cache,
                     overrides,
+                    is_phone_client,
                 )
                 .await;
 
@@ -567,8 +649,47 @@ fn app() -> Html {
                     editor.set(Some(editor_state));
                 }
 
+                if keep_top_for_about {
+                    TimeoutFuture::new(16).await;
+                    if let Some(element) = output_ref.cast::<HtmlElement>() {
+                        element.set_scroll_top(0);
+                    }
+                }
+
                 busy_handle.set(false);
             });
+        })
+    };
+    let dismiss_prompt_spotlight = {
+        let prompt_spotlight = prompt_spotlight.clone();
+        Callback::from(move |event: MouseEvent| {
+            event.prevent_default();
+            event.stop_propagation();
+            prompt_spotlight.set(false);
+        })
+    };
+    let on_terminal_click = {
+        let prompt_input_ref = prompt_input_ref.clone();
+        let boot_phase = boot_phase.clone();
+        let editor = editor.clone();
+        Callback::from(move |event: MouseEvent| {
+            if *boot_phase != BootPhase::Ready || editor.is_some() {
+                return;
+            }
+
+            let Some(target) = event.target_dyn_into::<Element>() else {
+                return;
+            };
+
+            if target.closest(".filter-chip").ok().flatten().is_some() {
+                return;
+            }
+
+            if let Some(input) = prompt_input_ref.cast::<HtmlInputElement>() {
+                let _ = input.focus();
+                let len = input.value().len() as u32;
+                let _ = input.set_selection_range(len, len);
+            }
         })
     };
 
@@ -858,7 +979,63 @@ fn app() -> Html {
                                 state.tree_selection = state.tree_selection.saturating_sub(1);
                                 editor.set(Some(state));
                             }
-                            "h" | "ArrowLeft" => editor.set(Some(state)),
+                            "h" | "ArrowLeft" => {
+                                if state.tree_dir.is_empty() {
+                                    state.status = String::from("NvimTree: /");
+                                    editor.set(Some(state));
+                                } else {
+                                    let parent = state.tree_dir[..state.tree_dir.len() - 1].to_vec();
+                                    let request_nonce = state.tree_nonce.wrapping_add(1);
+                                    state.tree_nonce = request_nonce;
+                                    state.status =
+                                        format!("NvimTree: loading {}", display_path(&parent));
+                                    let projects_data = (*projects).clone();
+                                    let dir_cache = dir_cache.clone();
+                                    let overrides = overrides.clone();
+                                    let editor_for_async = editor.clone();
+                                    let requested_dir = parent.clone();
+
+                                    spawn_local(async move {
+                                        match list_path(
+                                            &requested_dir,
+                                            &projects_data,
+                                            dir_cache,
+                                            overrides,
+                                        )
+                                        .await
+                                        {
+                                            Ok(entries) => {
+                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                    if live.tree_nonce != request_nonce {
+                                                        return;
+                                                    }
+                                                    live.tree_dir = requested_dir.clone();
+                                                    live.tree_entries = editor_tree_files(entries);
+                                                    live.tree_selection = 0;
+                                                    live.status = format!(
+                                                        "NvimTree: {}",
+                                                        display_path(&requested_dir)
+                                                    );
+                                                    editor_for_async.set(Some(live));
+                                                }
+                                            }
+                                            Err(error) => {
+                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                    if live.tree_nonce != request_nonce {
+                                                        return;
+                                                    }
+                                                    live.status = format!(
+                                                        "NvimTree error ({}): {error}",
+                                                        display_path(&requested_dir)
+                                                    );
+                                                    editor_for_async.set(Some(live));
+                                                }
+                                            }
+                                        }
+                                    });
+                                    editor.set(Some(state));
+                                }
+                            }
                             "Enter" | "l" | "ArrowRight" => {
                                 let Some(selected) =
                                     state.tree_entries.get(state.tree_selection).cloned()
@@ -871,8 +1048,54 @@ fn app() -> Html {
                                 target.push(selected.trim_end_matches('/').to_string());
 
                                 if selected.ends_with('/') {
+                                    let request_nonce = state.tree_nonce.wrapping_add(1);
+                                    state.tree_nonce = request_nonce;
                                     state.status =
-                                        String::from("NvimTree: directory navigation disabled");
+                                        format!("NvimTree: loading {}", display_path(&target));
+                                    let projects_data = (*projects).clone();
+                                    let dir_cache = dir_cache.clone();
+                                    let overrides = overrides.clone();
+                                    let editor_for_async = editor.clone();
+                                    let requested_dir = target.clone();
+
+                                    spawn_local(async move {
+                                        match list_path(
+                                            &requested_dir,
+                                            &projects_data,
+                                            dir_cache,
+                                            overrides,
+                                        )
+                                        .await
+                                        {
+                                            Ok(entries) => {
+                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                    if live.tree_nonce != request_nonce {
+                                                        return;
+                                                    }
+                                                    live.tree_dir = requested_dir.clone();
+                                                    live.tree_entries = editor_tree_files(entries);
+                                                    live.tree_selection = 0;
+                                                    live.status = format!(
+                                                        "NvimTree: {}",
+                                                        display_path(&requested_dir)
+                                                    );
+                                                    editor_for_async.set(Some(live));
+                                                }
+                                            }
+                                            Err(error) => {
+                                                if let Some(mut live) = (*editor_for_async).clone() {
+                                                    if live.tree_nonce != request_nonce {
+                                                        return;
+                                                    }
+                                                    live.status = format!(
+                                                        "NvimTree error ({}): {error}",
+                                                        display_path(&requested_dir)
+                                                    );
+                                                    editor_for_async.set(Some(live));
+                                                }
+                                            }
+                                        }
+                                    });
                                     editor.set(Some(state));
                                 } else {
                                     let identity_data =
@@ -1166,15 +1389,232 @@ fn app() -> Html {
         })
     };
 
+    let clear_project_filters = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            project_filters.set(ProjectFilters::default());
+        })
+    };
+    let toggle_team_solo = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.team = if next.team == Some(ProjectTeam::Solo) {
+                None
+            } else {
+                Some(ProjectTeam::Solo)
+            };
+            project_filters.set(next);
+        })
+    };
+    let toggle_team_team = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.team = if next.team == Some(ProjectTeam::Team) {
+                None
+            } else {
+                Some(ProjectTeam::Team)
+            };
+            project_filters.set(next);
+        })
+    };
+    let toggle_context_personal = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.context = if next.context == Some(ProjectContext::Personal) {
+                None
+            } else {
+                Some(ProjectContext::Personal)
+            };
+            project_filters.set(next);
+        })
+    };
+    let toggle_context_uni = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.context = if next.context == Some(ProjectContext::University) {
+                None
+            } else {
+                Some(ProjectContext::University)
+            };
+            project_filters.set(next);
+        })
+    };
+    let toggle_context_professional = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.context = if next.context == Some(ProjectContext::Professional) {
+                None
+            } else {
+                Some(ProjectContext::Professional)
+            };
+            project_filters.set(next);
+        })
+    };
+    let toggle_legacy_only = {
+        let project_filters = project_filters.clone();
+        Callback::from(move |_| {
+            let mut next = *project_filters;
+            next.legacy_only = !next.legacy_only;
+            project_filters.set(next);
+        })
+    };
+    let filters = *project_filters;
+    let terminal_lines_view = {
+        let mut filters_inserted = false;
+        let render_filters_bar = || {
+            html! {
+                <div class="line line-filter-row">
+                    <section class="project-filters">
+                        <span class="filters-label">{"project filters:"}</span>
+                        <span class="filter-group">
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    if filters == ProjectFilters::default() { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={clear_project_filters.clone()}
+                            >
+                                {"ALL"}
+                            </button>
+                        </span>
+                        <span class="filter-sep"></span>
+                        <span class="filter-group">
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-team-solo",
+                                    if filters.team == Some(ProjectTeam::Solo) { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_team_solo.clone()}
+                            >
+                                {"SOLO"}
+                            </button>
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-team-team",
+                                    if filters.team == Some(ProjectTeam::Team) { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_team_team.clone()}
+                            >
+                                {"TEAM"}
+                            </button>
+                        </span>
+                        <span class="filter-sep"></span>
+                        <span class="filter-group">
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-context-personal",
+                                    if filters.context == Some(ProjectContext::Personal) { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_context_personal.clone()}
+                            >
+                                {"PERSONAL"}
+                            </button>
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-context-uni",
+                                    if filters.context == Some(ProjectContext::University) { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_context_uni.clone()}
+                            >
+                                {"UNI"}
+                            </button>
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-context-professional",
+                                    if filters.context == Some(ProjectContext::Professional) { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_context_professional.clone()}
+                            >
+                                {"PROFESSIONAL"}
+                            </button>
+                        </span>
+                        <span class="filter-sep"></span>
+                        <span class="filter-group">
+                            <button
+                                class={classes!(
+                                    "filter-chip",
+                                    "badge-era-legacy",
+                                    if filters.legacy_only { "is-active" } else { "" }
+                                )}
+                                type="button"
+                                onclick={toggle_legacy_only.clone()}
+                            >
+                                {"LEGACY"}
+                            </button>
+                        </span>
+                    </section>
+                </div>
+            }
+        };
+
+        html! {
+            <>
+                {for terminal.lines.iter().filter_map(|line| {
+                    match line.kind {
+                        LineKind::Project => {
+                            let project = line.project.as_ref()?;
+                            if !project_matches_filters(project, &filters) {
+                                return None;
+                            }
+                            Some(render_line(line))
+                        }
+                        LineKind::Section => {
+                            if line.text == "[featured projects]" && !filters_inserted {
+                                filters_inserted = true;
+                                return Some(html! {
+                                    <>
+                                        {render_line(line)}
+                                        {render_filters_bar()}
+                                    </>
+                                });
+                            }
+                            Some(render_line(line))
+                        }
+                        _ => Some(render_line(line)),
+                    }
+                })}
+            </>
+        }
+    };
+
     html! {
-        <main class="frame">
+        <main
+            class={classes!("frame", if *prompt_spotlight { "is-spotlight" } else { "" })}
+            onclick={on_terminal_click}
+        >
+            {
+                if *font_loading {
+                    html! {
+                        <section class="font-loader">
+                            <div class="font-loader-spinner"></div>
+                            <span class="font-loader-text">{"loading terminal font..."}</span>
+                        </section>
+                    }
+                } else {
+                    html! {}
+                }
+            }
             {
                 if *boot_phase != BootPhase::Ready {
                     html! {
                         <header class="boot-header">
-                            <span class="prompt-label">{"wowvain@kaaldur:/projects$ "}</span>
-                            <span>{(*boot_input).clone()}</span>
-                            <span class="cursor">{if *cursor_on { "_" } else { " " }}</span>
+                            <span class="hint">{"loading terminal..."}</span>
                         </header>
                     }
                 } else {
@@ -1224,7 +1664,7 @@ fn app() -> Html {
                                                         })
                                                     }
                                                 </div>
-                                                <div class="editor-tree-hint">{"<Space>e toggle | <Space>w h/j/k/l switch pane | Enter open file | editor: w/b words, gg/G file"}</div>
+                                                <div class="editor-tree-hint">{"<Space>e toggle | Enter/l open item | h go parent | <Space>w h/j/k/l switch pane | editor: w/b words, gg/G file"}</div>
                                             </aside>
                                         }
                                     } else {
@@ -1285,27 +1725,41 @@ fn app() -> Html {
                     html! {
                         <>
                             <section class="terminal-output" ref={output_ref}>
-                                {for terminal.lines.iter().map(render_line)}
+                                {terminal_lines_view.clone()}
                             </section>
                             {
                                 if *boot_phase == BootPhase::Ready {
                                     html! {
                                         <>
-                                            <form class="prompt-row" {onsubmit}>
-                                                <span class="prompt-label">{format_prompt(cwd.as_ref())}</span>
-                                                <input
-                                                    class="prompt-input"
-                                                    type="text"
-                                                    ref={prompt_input_ref}
-                                                    value={(*command_input).clone()}
-                                                    {oninput}
-                                                    onkeydown={onkeydown}
-                                                    autocomplete="off"
-                                                    autocorrect="off"
-                                                    spellcheck="false"
-                                                    disabled={*busy}
-                                                />
-                                            </form>
+                                            <div class={classes!(
+                                                "prompt-focus",
+                                                if *prompt_spotlight { "is-active" } else { "" }
+                                            )}>
+                                                <div class="prompt-spotlight-msg">
+                                                    <span>{"Try writing `about`"}</span>
+                                                    <button
+                                                        class="prompt-spotlight-close"
+                                                        type="button"
+                                                        onclick={dismiss_prompt_spotlight.clone()}
+                                                        aria-label="Dismiss onboarding hint"
+                                                    ></button>
+                                                </div>
+                                                <form class="prompt-row" {onsubmit}>
+                                                    <span class="prompt-label">{format_prompt(cwd.as_ref())}</span>
+                                                    <input
+                                                        class="prompt-input"
+                                                        type="text"
+                                                        ref={prompt_input_ref}
+                                                        value={(*command_input).clone()}
+                                                        {oninput}
+                                                        onkeydown={onkeydown}
+                                                        autocomplete="off"
+                                                        autocorrect="off"
+                                                        spellcheck="false"
+                                                        disabled={*busy}
+                                                    />
+                                                </form>
+                                            </div>
                                             {
                                                 if !completion_lines.is_empty() {
                                                     html! {
@@ -1340,6 +1794,7 @@ async fn run_command(
     dir_cache: UseStateHandle<DirCache>,
     file_cache: UseStateHandle<FileCache>,
     overrides: UseStateHandle<OverrideMap>,
+    is_phone_client: bool,
 ) -> CommandOutcome {
     let mut outcome = CommandOutcome::default();
     let mut parts = raw.split_whitespace();
@@ -1796,6 +2251,11 @@ async fn run_command(
             }
         }
         "nvim" | "vim" => {
+            if is_phone_client {
+                outcome.lines.push(TerminalLine::error(MOBILE_NVIM_WARNING));
+                return outcome;
+            }
+
             let Some(path_arg) = args.first() else {
                 outcome.lines.push(TerminalLine::error(
                     "nvim: missing file path (usage: nvim <path>)",
@@ -2781,9 +3241,6 @@ fn ls_token(name: &str, width_ch: usize) -> LsToken {
 
 fn editor_tree_files(entries: Vec<String>) -> Vec<String> {
     entries
-        .into_iter()
-        .filter(|entry| !entry.ends_with('/'))
-        .collect::<Vec<_>>()
 }
 
 fn merge_virtual_entries(entries: &mut Vec<String>, dir_path: &[String], overrides: &OverrideMap) {
@@ -2952,11 +3409,6 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
         }
     }
 
-    lines.push(TerminalLine::section("[legend]"));
-    lines.push(TerminalLine::muted(
-        "markers: UNI=university SOLO=solo TEAM=team LEGACY=>3y WIP=active",
-    ));
-
     let remaining = projects
         .iter()
         .filter(|project| !project.featured)
@@ -2968,6 +3420,14 @@ fn about_lines(identity: &Identity, projects: &[Project]) -> Vec<TerminalLine> {
             lines.push(TerminalLine::project(project));
         }
     }
+
+    lines.push(TerminalLine::section("[legend]"));
+    lines.push(TerminalLine::legend("team", &["SOLO", "TEAM"]));
+    lines.push(TerminalLine::legend(
+        "context",
+        &["PERSONAL", "UNI", "PROFESSIONAL"],
+    ));
+    lines.push(TerminalLine::legend("currentness", &["LEGACY"]));
 
     lines.push(TerminalLine::muted(format!(
         "scope: {}",
@@ -2999,9 +3459,11 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
             project.description
         ));
     }
-    output.push(String::from(
-        "markers: UNI=university SOLO=solo TEAM=team LEGACY=>3y WIP=active",
-    ));
+    output.push(String::new());
+    output.push(String::from("legend:"));
+    output.push(String::from("  team: SOLO | TEAM"));
+    output.push(String::from("  context: PERSONAL | UNI | PROFESSIONAL"));
+    output.push(String::from("  currentness: LEGACY"));
 
     output.push(String::new());
     output.push(format!("scope: {}", identity.scope_note));
@@ -3010,12 +3472,15 @@ fn about_text(identity: &Identity, projects: &[Project]) -> String {
 }
 
 fn project_meta(project: &Project) -> String {
+    let team = resolved_project_team(project);
+    let context = resolved_project_context(project);
     format!(
-        "name: {}\nowner: {}\nstack: {}\nsource: {}\nera: {}\nmarkers: {}\ndescription: {}\nurl: {}",
+        "name: {}\nowner: {}\nstack: {}\nteam: {}\ncontext: {}\nera: {}\nmarkers: {}\ndescription: {}\nurl: {}",
         project.name,
         project.owner,
         project.primary_stack,
-        project_source_label(project.source),
+        project_team_label(team),
+        project_context_label(context),
         project_era_label(project.era),
         project_badges(project).join("|"),
         project.description,
@@ -3024,22 +3489,39 @@ fn project_meta(project: &Project) -> String {
 }
 
 fn project_badges(project: &Project) -> Vec<&'static str> {
-    let mut badges = Vec::new();
-    match project.source {
-        ProjectSource::University => badges.push("UNI"),
-        ProjectSource::Solo => badges.push("SOLO"),
-        ProjectSource::Team => badges.push("TEAM"),
-    }
+    let mut badges = vec![
+        project_team_tag(resolved_project_team(project)),
+        project_context_tag(resolved_project_context(project)),
+    ];
 
     if project.era == ProjectEra::Legacy {
         badges.push("LEGACY");
     }
 
-    if project.work_in_progress {
-        badges.push("WIP");
+    badges
+}
+
+fn resolved_project_team(project: &Project) -> ProjectTeam {
+    if let Some(team) = project.team {
+        return team;
     }
 
-    badges
+    match project.source {
+        Some(ProjectSourceLegacy::Team) => ProjectTeam::Team,
+        _ => ProjectTeam::Solo,
+    }
+}
+
+fn resolved_project_context(project: &Project) -> ProjectContext {
+    if let Some(context) = project.context {
+        return context;
+    }
+
+    match project.source {
+        Some(ProjectSourceLegacy::University) => ProjectContext::University,
+        Some(ProjectSourceLegacy::Team) => ProjectContext::Professional,
+        _ => ProjectContext::Personal,
+    }
 }
 
 fn project_badge_text(project: &Project) -> String {
@@ -3051,11 +3533,33 @@ fn project_badge_text(project: &Project) -> String {
     }
 }
 
-fn project_source_label(source: ProjectSource) -> &'static str {
-    match source {
-        ProjectSource::University => "university",
-        ProjectSource::Solo => "solo",
-        ProjectSource::Team => "team",
+fn project_team_tag(team: ProjectTeam) -> &'static str {
+    match team {
+        ProjectTeam::Solo => "SOLO",
+        ProjectTeam::Team => "TEAM",
+    }
+}
+
+fn project_context_tag(context: ProjectContext) -> &'static str {
+    match context {
+        ProjectContext::Personal => "PERSONAL",
+        ProjectContext::University => "UNI",
+        ProjectContext::Professional => "PROFESSIONAL",
+    }
+}
+
+fn project_team_label(team: ProjectTeam) -> &'static str {
+    match team {
+        ProjectTeam::Solo => "solo",
+        ProjectTeam::Team => "team",
+    }
+}
+
+fn project_context_label(context: ProjectContext) -> &'static str {
+    match context {
+        ProjectContext::Personal => "personal",
+        ProjectContext::University => "university",
+        ProjectContext::Professional => "professional",
     }
 }
 
@@ -3101,15 +3605,46 @@ fn project_has_valid_link(project: &Project) -> bool {
 
 fn render_project_badge(badge: &str) -> Html {
     let class = match badge {
-        "UNI" => "badge-source-uni",
-        "SOLO" => "badge-source-solo",
-        "TEAM" => "badge-source-team",
+        "SOLO" => "badge-team-solo",
+        "TEAM" => "badge-team-team",
+        "PERSONAL" => "badge-context-personal",
+        "UNI" => "badge-context-uni",
+        "PROFESSIONAL" => "badge-context-professional",
         "LEGACY" => "badge-era-legacy",
-        "WIP" => "badge-wip",
         _ => "badge-generic",
     };
 
     html! { <span class={classes!("project-badge", class)}>{badge}</span> }
+}
+
+fn render_legend_row(row: &LegendRow) -> Html {
+    html! {
+        <div class="line line-legend">
+            <span class="legend-label">{format!("{}:", row.label)}</span>
+            <span class="project-badges">
+                {for row.badges.iter().map(|badge| render_project_badge(badge.as_str()))}
+            </span>
+        </div>
+    }
+}
+
+fn project_matches_filters(project: &Project, filters: &ProjectFilters) -> bool {
+    let team = resolved_project_team(project);
+    let context = resolved_project_context(project);
+
+    if let Some(filter_team) = filters.team {
+        if filter_team != team {
+            return false;
+        }
+    }
+
+    if let Some(filter_context) = filters.context {
+        if filter_context != context {
+            return false;
+        }
+    }
+
+    !filters.legacy_only || project.era == ProjectEra::Legacy
 }
 
 fn render_line(line: &TerminalLine) -> Html {
@@ -3126,6 +3661,13 @@ fn render_line(line: &TerminalLine) -> Html {
                 html! { <p class="line line-muted">{"[invalid project line]"}</p> }
             }
         }
+        LineKind::Legend => {
+            if let Some(row) = line.legend.as_ref() {
+                render_legend_row(row)
+            } else {
+                html! { <p class="line line-muted">{"[invalid legend line]"}</p> }
+            }
+        }
         _ => {
             let class = match line.kind {
                 LineKind::Command => "line line-command",
@@ -3135,6 +3677,7 @@ fn render_line(line: &TerminalLine) -> Html {
                 LineKind::Muted => "line line-muted",
                 LineKind::Ls => "line",
                 LineKind::Project => "line",
+                LineKind::Legend => "line",
             };
 
             html! { <p class={class}>{line.text.clone()}</p> }
@@ -4568,6 +5111,35 @@ fn display_path(cwd: &[String]) -> String {
     } else {
         format!("/{}", cwd.join("/"))
     }
+}
+
+async fn wait_for_initial_fonts() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    let fonts = document.fonts();
+    let Ok(ready) = fonts.ready() else {
+        return;
+    };
+    let _ = JsFuture::from(ready).await;
+}
+
+fn is_phone_device() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(user_agent) = window.navigator().user_agent() else {
+        return false;
+    };
+    let normalized = user_agent.to_ascii_lowercase();
+    normalized.contains("iphone")
+        || normalized.contains("android")
+        || normalized.contains("mobile")
+        || normalized.contains("ipod")
+        || normalized.contains("windows phone")
 }
 
 fn format_repo_entry(entry: RepoEntry) -> String {
