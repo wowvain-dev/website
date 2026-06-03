@@ -38,6 +38,8 @@ struct Project {
     description: String,
     primary_stack: String,
     #[serde(default)]
+    last_pushed_at: Option<String>,
+    #[serde(default)]
     team: Option<ProjectTeam>,
     #[serde(default)]
     context: Option<ProjectContext>,
@@ -3955,10 +3957,11 @@ fn project_meta(project: &Project) -> String {
     let team = resolved_project_team(project);
     let context = resolved_project_context(project);
     format!(
-        "name: {}\nowner: {}\nstack: {}\nteam: {}\ncontext: {}\nera: {}\nmarkers: {}\ndescription: {}\nurl: {}",
+        "name: {}\nowner: {}\nstack: {}\nlast_push: {}\nteam: {}\ncontext: {}\nera: {}\nmarkers: {}\ndescription: {}\nurl: {}",
         project.name,
         project.owner,
         project.primary_stack,
+        project_last_push_label(project),
         project_team_label(team),
         project_context_label(context),
         project_era_label(project.era),
@@ -4053,6 +4056,7 @@ fn project_era_label(era: ProjectEra) -> &'static str {
 fn render_project_line(project: &Project) -> Html {
     let badges = project_badges(project);
     let has_link = project_has_valid_link(project);
+    let last_push = project_last_push_label(project);
 
     html! {
         <div class="line line-project">
@@ -4073,9 +4077,29 @@ fn render_project_line(project: &Project) -> Html {
                 </span>
             </div>
             <div class="project-stack">{project.primary_stack.clone()}</div>
+            <div class="project-last-push">{format!("last push: {last_push}")}</div>
             <div class="project-description">{project.description.clone()}</div>
         </div>
     }
+}
+
+fn project_last_push_label(project: &Project) -> String {
+    let Some(value) = project.last_pushed_at.as_deref() else {
+        return String::from("not available");
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::from("not available");
+    }
+
+    if let Some(without_z) = trimmed.strip_suffix('Z') {
+        return format!("{} UTC", without_z.replace('T', " "));
+    }
+    if let Some(without_offset) = trimmed.strip_suffix("+00:00") {
+        return format!("{} UTC", without_offset.replace('T', " "));
+    }
+
+    trimmed.replace('T', " ")
 }
 
 fn project_has_valid_link(project: &Project) -> bool {
