@@ -1,0 +1,4 @@
+target
+frontend/dist
+frontend/target
+.git

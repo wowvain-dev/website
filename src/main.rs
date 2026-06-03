@@ -12,12 +12,12 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use dotenvy::dotenv;
 use portfolio::{Identity, Project, fallback_project_data, identity_data, synced_project_data};
 use serde::Serialize;
-use tokio::sync::{Mutex, RwLock};
-use tower_http::services::{ServeDir, ServeFile};
 use std::{
     env,
     net::{IpAddr, SocketAddr},
 };
+use tokio::sync::{Mutex, RwLock};
+use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
 struct AppState {
@@ -98,7 +98,11 @@ impl ProjectCache {
             Err(error) => {
                 *self.last_error.write().await = Some(error.clone());
                 let project_count = self.projects.read().await.len();
-                let last_refresh = self.last_refresh.read().await.map(|stamp| stamp.to_rfc3339());
+                let last_refresh = self
+                    .last_refresh
+                    .read()
+                    .await
+                    .map(|stamp| stamp.to_rfc3339());
                 RefreshResponse {
                     ok: false,
                     refreshed: false,
@@ -154,7 +158,10 @@ async fn main() {
     let app = Router::new()
         .route("/api/identity", get(identity))
         .route("/api/projects", get(projects))
-        .route("/api/projects/refresh", get(force_refresh).post(force_refresh))
+        .route(
+            "/api/projects/refresh",
+            get(force_refresh).post(force_refresh),
+        )
         .fallback_service(
             ServeDir::new("frontend/dist")
                 .append_index_html_on_directories(true)
@@ -162,13 +169,17 @@ async fn main() {
         )
         .with_state(state.clone());
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .expect("failed to bind server to 127.0.0.1:3000");
+    let bind_addr = env::var("BIND_ADDR").unwrap_or_else(|_| String::from("127.0.0.1:3000"));
 
-    println!("Server running on http://127.0.0.1:3000");
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .unwrap_or_else(|error| panic!("failed to bind server to {bind_addr}: {error}"));
+
+    println!("Server running on http://{bind_addr}");
     println!("Build frontend with: trunk build --release (from frontend/)");
-    println!("Force refresh endpoint: POST /api/projects/refresh (restricted by MVPS_SERVER_IP in .env)");
+    println!(
+        "Force refresh endpoint: POST /api/projects/refresh (restricted by MVPS_SERVER_IP in .env)"
+    );
     if let Some(ip) = state.allowed_refresh_ip {
         println!("Force refresh allowed IP: {ip}");
     } else {
@@ -179,8 +190,8 @@ async fn main() {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-        .await
-        .expect("server terminated unexpectedly");
+    .await
+    .expect("server terminated unexpectedly");
 }
 
 async fn identity(State(state): State<AppState>) -> Json<Identity> {
@@ -263,7 +274,10 @@ fn load_allowed_refresh_ip() -> Option<IpAddr> {
 
 fn resolve_request_ip(headers: &HeaderMap, source_addr: SocketAddr) -> IpAddr {
     for header_name in ["x-forwarded-for", "x-real-ip"] {
-        let Some(raw) = headers.get(header_name).and_then(|value| value.to_str().ok()) else {
+        let Some(raw) = headers
+            .get(header_name)
+            .and_then(|value| value.to_str().ok())
+        else {
             continue;
         };
         let Some(first) = raw.split(',').next().map(str::trim) else {
